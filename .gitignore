@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Node / frontend
+node_modules/
+dist/
+build/
+.next/
+.vite/
+
+# C/C++ build
+*.o
+*.a
+*.so
+*.out
+cmake-build-*/
+build/
+
+# Runtime outputs
+runtime/
+storage/
+profiles/
+logs/
+data/
+tmp/
+*.log
+*.db
+*.sqlite
+*.sqlite3
+
+# Profiling outputs
+perf.data
+perf.data.*
+out.perf
+out.folded
+*.folded
+*.collapsed
+flamegraph.svg
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
