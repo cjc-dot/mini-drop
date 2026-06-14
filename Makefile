@@ -2,12 +2,13 @@ SHELL := /usr/bin/env bash
 
 MINIDROP_RUNTIME ?= $(HOME)/mini-drop-runtime
 PYTHON ?= python3
-PYTHONPATH := $(CURDIR)/analysis
+PYTHONPATH := $(CURDIR)/analysis:$(CURDIR)/drop
 PROFILE_ID ?= manual-001
+JOB_ID ?= demo-agent
 DURATION ?= 10
 FREQUENCY ?= 99
 
-.PHONY: init build-workload collect test clean-runtime demo
+.PHONY: init build-workload collect agent-run test clean-runtime demo agent-demo
 
 init:
 	mkdir -p $(MINIDROP_RUNTIME)/builds
@@ -29,6 +30,15 @@ collect:
 		--frequency $(FREQUENCY) \
 		--output $(MINIDROP_RUNTIME)/profiles/$(PROFILE_ID)
 
+agent-run:
+	@if [ -z "$(PID)" ]; then echo "Usage: make agent-run PID=<target-pid> [DURATION=10] [FREQUENCY=99] [JOB_ID=name]"; exit 2; fi
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m minidrop_agent run \
+		--pid $(PID) \
+		--duration $(DURATION) \
+		--frequency $(FREQUENCY) \
+		--job-id $(JOB_ID) \
+		--runtime-dir $(MINIDROP_RUNTIME)
+
 demo: build-workload
 	@set -euo pipefail; \
 	$(MINIDROP_RUNTIME)/builds/cpu_hotspot > $(MINIDROP_RUNTIME)/logs/cpu_hotspot.log 2>&1 & \
@@ -38,8 +48,19 @@ demo: build-workload
 	sleep 1; \
 	$(MAKE) collect PID=$$pid PROFILE_ID=demo DURATION=$(DURATION) FREQUENCY=$(FREQUENCY)
 
+agent-demo: build-workload
+	@set -euo pipefail; \
+	$(MINIDROP_RUNTIME)/builds/cpu_hotspot > $(MINIDROP_RUNTIME)/logs/cpu_hotspot.log 2>&1 & \
+	pid=$$!; \
+	echo "Started cpu_hotspot pid=$$pid"; \
+	trap 'kill $$pid >/dev/null 2>&1 || true' EXIT; \
+	sleep 1; \
+	$(MAKE) agent-run PID=$$pid JOB_ID=$(JOB_ID) DURATION=$(DURATION) FREQUENCY=$(FREQUENCY)
+
 test:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m pytest tests
 
 clean-runtime:
 	rm -rf $(MINIDROP_RUNTIME)/profiles/demo
+	rm -rf $(MINIDROP_RUNTIME)/profiles/$(JOB_ID)
+	rm -rf $(MINIDROP_RUNTIME)/jobs/$(JOB_ID)
