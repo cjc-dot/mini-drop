@@ -2,13 +2,15 @@ SHELL := /usr/bin/env bash
 
 MINIDROP_RUNTIME ?= $(HOME)/mini-drop-runtime
 PYTHON ?= python3
-PYTHONPATH := $(CURDIR)/analysis:$(CURDIR)/drop
+PYTHONPATH := $(CURDIR)/analysis:$(CURDIR)/drop:$(CURDIR)/apiserver
 PROFILE_ID ?= manual-001
 JOB_ID ?= demo-agent
 DURATION ?= 10
 FREQUENCY ?= 99
+API_HOST ?= 127.0.0.1
+API_PORT ?= 8000
 
-.PHONY: init build-workload collect agent-run test clean-runtime demo agent-demo
+.PHONY: init build-workload collect agent-run api-run test clean-runtime demo agent-demo
 
 init:
 	mkdir -p $(MINIDROP_RUNTIME)/builds
@@ -37,6 +39,12 @@ agent-run:
 		--duration $(DURATION) \
 		--frequency $(FREQUENCY) \
 		--job-id $(JOB_ID) \
+		--runtime-dir $(MINIDROP_RUNTIME)
+
+api-run: init
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m minidrop_apiserver \
+		--host $(API_HOST) \
+		--port $(API_PORT) \
 		--runtime-dir $(MINIDROP_RUNTIME)
 
 demo: build-workload

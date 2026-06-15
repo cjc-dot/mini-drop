@@ -7,6 +7,7 @@ Mini-Drop is a Linux profiling practice project. The current milestone provides 
 3. convert `perf script` output into folded stacks;
 4. render a simple flame graph SVG and a JSON summary.
 5. run the same collector through a local Agent job state machine.
+6. create and query profiling jobs through a minimal API server.
 
 ## Quick Start
 
@@ -28,6 +29,13 @@ To run the local Agent wrapper:
 make agent-demo JOB_ID=demo-agent DURATION=10 FREQUENCY=99
 ```
 
+To run the API server:
+
+```bash
+make api-run
+curl http://127.0.0.1:8000/api/health
+```
+
 Artifacts are written outside the repository by default:
 
 ```text
@@ -39,7 +47,7 @@ Artifacts are written outside the repository by default:
 
 ```text
 analysis/      Python analysis and collector code
-apiserver/     API server implementation
+apiserver/     API server and file-backed job store
 deploy/        Deployment and docker compose files
 drop/          Agent-side job runner implementation
 proto/         Cross-component interface definitions
