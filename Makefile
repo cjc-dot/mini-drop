@@ -5,12 +5,13 @@ PYTHON ?= python3
 PYTHONPATH := $(CURDIR)/analysis:$(CURDIR)/drop:$(CURDIR)/apiserver
 PROFILE_ID ?= manual-001
 JOB_ID ?= demo-agent
+PENDING_JOB_ID ?=
 DURATION ?= 10
 FREQUENCY ?= 99
 API_HOST ?= 127.0.0.1
 API_PORT ?= 8000
 
-.PHONY: init build-workload collect agent-run api-run test clean-runtime demo agent-demo
+.PHONY: init build-workload collect agent-run agent-run-pending api-run test clean-runtime demo agent-demo
 
 init:
 	mkdir -p $(MINIDROP_RUNTIME)/builds
@@ -40,6 +41,11 @@ agent-run:
 		--frequency $(FREQUENCY) \
 		--job-id $(JOB_ID) \
 		--runtime-dir $(MINIDROP_RUNTIME)
+
+agent-run-pending:
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m minidrop_agent run-pending \
+		--runtime-dir $(MINIDROP_RUNTIME) \
+		$(if $(PENDING_JOB_ID),--job-id $(PENDING_JOB_ID),)
 
 api-run: init
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m minidrop_apiserver \

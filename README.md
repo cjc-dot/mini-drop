@@ -36,6 +36,12 @@ make api-run
 curl http://127.0.0.1:8000/api/health
 ```
 
+After creating a job through the API, the local Agent can consume one pending job:
+
+```bash
+make agent-run-pending
+```
+
 Artifacts are written outside the repository by default:
 
 ```text

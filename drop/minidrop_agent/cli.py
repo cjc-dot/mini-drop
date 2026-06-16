@@ -25,6 +25,10 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--runtime-dir", default="~/mini-drop-runtime")
     run.add_argument("--collector", default="perf", choices=["perf"])
 
+    run_pending = subcommands.add_parser("run-pending", help="run one pending job from the runtime job store")
+    run_pending.add_argument("--runtime-dir", default="~/mini-drop-runtime")
+    run_pending.add_argument("--job-id", default=None)
+
     return parser
 
 
@@ -40,6 +44,15 @@ def main(argv: list[str] | None = None) -> int:
             collector=args.collector,
         )
         result = LocalAgent(runtime_dir=args.runtime_dir).run(spec)
+        print(f"Job {result.job_id} finished with status {result.status}")
+        print(f"Job metadata: {result.job_file}")
+        return 0 if result.status == "DONE" else 1
+
+    if args.command == "run-pending":
+        result = LocalAgent(runtime_dir=args.runtime_dir).run_pending_once(job_id=args.job_id)
+        if result is None:
+            print("No pending job found")
+            return 0
         print(f"Job {result.job_id} finished with status {result.status}")
         print(f"Job metadata: {result.job_file}")
         return 0 if result.status == "DONE" else 1
