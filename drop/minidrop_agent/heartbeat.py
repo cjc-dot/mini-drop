@@ -15,6 +15,7 @@ class HeartbeatResult:
     server_url: str
     status: str
     response: dict
+    error_message: str | None = None
 
 
 class HeartbeatClient:
@@ -47,17 +48,28 @@ class HeartbeatClient:
         return HeartbeatResult(
             agent_id=agent_id,
             server_url=self.server_url,
-            status=data["status"],
+            status=data.get("status", "UNKNOWN"),
             response=data,
         )
 
     def send_loop(self, agent_id: str, interval_seconds: int, count: int, version: str = "0.1.0") -> list[HeartbeatResult]:
         results = []
-        sent = 0
-        while count == 0 or sent < count:
-            results.append(self.send_once(agent_id=agent_id, version=version))
-            sent += 1
-            if count != 0 and sent >= count:
+        attempts = 0
+        while count == 0 or attempts < count:
+            try:
+                results.append(self.send_once(agent_id=agent_id, version=version))
+            except RuntimeError as exc:
+                results.append(
+                    HeartbeatResult(
+                        agent_id=agent_id,
+                        server_url=self.server_url,
+                        status="FAILED",
+                        response={},
+                        error_message=str(exc),
+                    )
+                )
+            attempts += 1
+            if count != 0 and attempts >= count:
                 break
             time.sleep(interval_seconds)
         return results

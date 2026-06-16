@@ -5,6 +5,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from minidrop_apiserver.agent_store import AgentRegistry
+from minidrop_agent import heartbeat as heartbeat_module
+from minidrop_agent.heartbeat import HeartbeatClient, HeartbeatResult
 
 
 def test_record_agent_heartbeat_persists_online_agent(tmp_path: Path) -> None:
@@ -69,3 +71,48 @@ def test_heartbeat_after_timeout_records_recovery(tmp_path: Path) -> None:
     assert recovered["status"] == "ONLINE"
     assert recovered["reason"] == "heartbeat recovered"
     assert [event["status"] for event in registry.get_agent_events("agent-1")] == ["ONLINE", "OFFLINE", "ONLINE"]
+
+
+class _FakeHttpResponse:
+    def __init__(self, payload: bytes) -> None:
+        self.payload = payload
+
+    def __enter__(self) -> "_FakeHttpResponse":
+        return self
+
+    def __exit__(self, exc_type, exc, traceback) -> None:
+        return None
+
+    def read(self) -> bytes:
+        return self.payload
+
+
+def test_heartbeat_client_uses_unknown_when_status_is_missing(monkeypatch) -> None:
+    def fake_urlopen(request, timeout):
+        return _FakeHttpResponse(b'{"agent_id": "agent-1"}')
+
+    monkeypatch.setattr(heartbeat_module, "urlopen", fake_urlopen)
+
+    result = HeartbeatClient("http://server").send_once("agent-1")
+
+    assert result.status == "UNKNOWN"
+    assert result.response == {"agent_id": "agent-1"}
+
+
+def test_heartbeat_loop_continues_after_single_failure(monkeypatch) -> None:
+    client = HeartbeatClient("http://server")
+    calls = {"count": 0}
+
+    def fake_send_once(agent_id: str, version: str = "0.1.0") -> HeartbeatResult:
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise RuntimeError("network unavailable")
+        return HeartbeatResult(agent_id=agent_id, server_url="http://server", status="ONLINE", response={"status": "ONLINE"})
+
+    monkeypatch.setattr(client, "send_once", fake_send_once)
+    monkeypatch.setattr(heartbeat_module.time, "sleep", lambda seconds: None)
+
+    results = client.send_loop(agent_id="agent-1", interval_seconds=5, count=2)
+
+    assert [result.status for result in results] == ["FAILED", "ONLINE"]
+    assert results[0].error_message == "network unavailable"

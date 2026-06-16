@@ -74,12 +74,16 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if result.status == "DONE" else 1
 
     if args.command == "heartbeat":
-        results = HeartbeatClient(args.server_url).send_loop(
-            agent_id=args.agent_id,
-            interval_seconds=args.interval,
-            count=args.count,
-            version=args.version,
-        )
+        try:
+            results = HeartbeatClient(args.server_url).send_loop(
+                agent_id=args.agent_id,
+                interval_seconds=args.interval,
+                count=args.count,
+                version=args.version,
+            )
+        except KeyboardInterrupt:
+            print("Heartbeat stopped by user")
+            return 130
         for result in results:
             print(json.dumps(result_to_dict(result), indent=2))
         return 0
