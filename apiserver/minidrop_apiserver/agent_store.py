@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
+from uuid import uuid4
 
 
 class AgentRegistry:
@@ -84,7 +86,7 @@ class AgentRegistry:
         return json.loads(agent_file.read_text(encoding="utf-8"))
 
     def _write_agent(self, agent: dict) -> None:
-        self._agent_file(agent["agent_id"]).write_text(json.dumps(agent, indent=2), encoding="utf-8")
+        self._write_json_atomic(self._agent_file(agent["agent_id"]), agent)
 
     def _append_agent_event(self, agent_id: str, status: str, reason: str) -> None:
         event = {
@@ -132,3 +134,17 @@ class AgentRegistry:
     @staticmethod
     def _now() -> str:
         return datetime.now(timezone.utc).isoformat()
+
+    @staticmethod
+    def _write_json_atomic(path: Path, payload: dict) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
+        try:
+            with temp_path.open("w", encoding="utf-8") as stream:
+                stream.write(json.dumps(payload, indent=2))
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temp_path, path)
+        finally:
+            if temp_path.exists():
+                temp_path.unlink()

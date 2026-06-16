@@ -46,6 +46,7 @@ def test_local_agent_persists_successful_state_transitions(tmp_path: Path) -> No
     job = json.loads((tmp_path / "jobs" / "job-test" / "job.json").read_text(encoding="utf-8"))
     assert job["status"] == "DONE"
     assert job["artifacts"]["flamegraph"].endswith("flamegraph.svg")
+    assert list((tmp_path / "jobs" / "job-test").glob(".*.tmp")) == []
 
 
 def test_local_agent_persists_failed_state(tmp_path: Path) -> None:

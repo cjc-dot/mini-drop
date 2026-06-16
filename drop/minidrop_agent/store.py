@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
+from uuid import uuid4
 
 from .job import JobEvent, JobSpec
 
@@ -88,7 +90,7 @@ class JobStore:
             "created_at": existing.get("created_at") or now,
             "updated_at": now,
         }
-        self.job_file(spec.job_id).write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        self._write_json_atomic(self.job_file(spec.job_id), payload)
 
     def append_event(self, event: JobEvent) -> None:
         with self.events_file(event.job_id).open("a", encoding="utf-8") as stream:
@@ -104,3 +106,17 @@ class JobStore:
             sample_frequency=int(spec["sample_frequency"]),
             collector=spec.get("collector", "perf"),
         )
+
+    @staticmethod
+    def _write_json_atomic(path: Path, payload: dict) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
+        try:
+            with temp_path.open("w", encoding="utf-8") as stream:
+                stream.write(json.dumps(payload, indent=2))
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temp_path, path)
+        finally:
+            if temp_path.exists():
+                temp_path.unlink()

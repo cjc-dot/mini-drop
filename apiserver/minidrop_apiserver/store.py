@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
@@ -59,7 +60,7 @@ class ServerJobStore:
 
     def _write_job(self, job: dict) -> None:
         job["updated_at"] = self._now()
-        self._job_file(job["job_id"]).write_text(json.dumps(job, indent=2), encoding="utf-8")
+        self._write_json_atomic(self._job_file(job["job_id"]), job)
 
     def _append_event(self, job_id: str, status: str, reason: str) -> None:
         event = {
@@ -89,3 +90,17 @@ class ServerJobStore:
     def _new_job_id() -> str:
         stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
         return f"job-{stamp}-{uuid4().hex[:6]}"
+
+    @staticmethod
+    def _write_json_atomic(path: Path, payload: dict) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
+        try:
+            with temp_path.open("w", encoding="utf-8") as stream:
+                stream.write(json.dumps(payload, indent=2))
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temp_path, path)
+        finally:
+            if temp_path.exists():
+                temp_path.unlink()

@@ -38,3 +38,12 @@ def test_get_missing_job_returns_none(tmp_path: Path) -> None:
 
     assert store.get_job("missing-job") is None
     assert store.get_events("missing-job") == []
+
+
+def test_create_job_atomic_snapshot_write_leaves_no_temp_file(tmp_path: Path) -> None:
+    store = ServerJobStore(str(tmp_path))
+    job = store.create_job(pid=1234, duration_seconds=10, sample_frequency=99)
+    job_dir = tmp_path / "jobs" / job["job_id"]
+
+    assert (job_dir / "job.json").exists()
+    assert list(job_dir.glob(".*.tmp")) == []

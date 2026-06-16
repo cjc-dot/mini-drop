@@ -32,6 +32,15 @@ def test_record_agent_heartbeat_persists_online_agent(tmp_path: Path) -> None:
     assert [event["status"] for event in events] == ["ONLINE"]
 
 
+def test_record_agent_heartbeat_atomic_snapshot_write_leaves_no_temp_file(tmp_path: Path) -> None:
+    registry = AgentRegistry(str(tmp_path))
+    registry.record_heartbeat(agent_id="agent-1", hostname="vm", pid=1234, version="0.1.0")
+    agent_dir = tmp_path / "agents" / "agent-1"
+
+    assert (agent_dir / "agent.json").exists()
+    assert list(agent_dir.glob(".*.tmp")) == []
+
+
 def test_list_agents_marks_stale_agent_offline(tmp_path: Path) -> None:
     registry = AgentRegistry(str(tmp_path))
     agent = registry.record_heartbeat(
