@@ -8,6 +8,7 @@ Mini-Drop is a Linux profiling practice project. The current milestone provides 
 4. render a simple flame graph SVG and a JSON summary.
 5. run the same collector through a local Agent job state machine.
 6. create and query profiling jobs through a minimal API server.
+7. view jobs, Agent heartbeat status, and result artifacts through a minimal Web UI.
 
 ## Quick Start
 
@@ -34,6 +35,12 @@ To run the API server:
 ```bash
 make api-run
 curl http://127.0.0.1:8000/api/health
+```
+
+Open the minimal Web UI after the API server starts:
+
+```text
+http://127.0.0.1:8000/ui
 ```
 
 After creating a job through the API, the local Agent can consume one pending job:

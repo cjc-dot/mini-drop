@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Mini-Drop</title>
+    <link rel="stylesheet" href="/ui/static/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <h1>Mini-Drop</h1>
+        <p>Profiling jobs and Agent health</p>
+      </div>
+      <button id="refreshButton" type="button">Refresh</button>
+    </header>
+
+    <main class="layout">
+      <section class="panel create-panel">
+        <div class="panel-title">
+          <h2>Create Job</h2>
+          <span id="createStatus" class="muted"></span>
+        </div>
+        <form id="createJobForm" class="job-form">
+          <label>
+            <span>PID</span>
+            <input id="pidInput" name="pid" type="number" min="1" required />
+          </label>
+          <label>
+            <span>Duration</span>
+            <input id="durationInput" name="duration" type="number" min="1" value="10" required />
+          </label>
+          <label>
+            <span>Frequency</span>
+            <input id="frequencyInput" name="frequency" type="number" min="1" value="99" required />
+          </label>
+          <button type="submit">Create</button>
+        </form>
+      </section>
+
+      <section class="panel">
+        <div class="panel-title">
+          <h2>Agents</h2>
+          <span id="agentCount" class="muted">0</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Agent</th>
+                <th>Status</th>
+                <th>Host</th>
+                <th>PID</th>
+                <th>Last Heartbeat</th>
+                <th>Lag</th>
+              </tr>
+            </thead>
+            <tbody id="agentsBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-title">
+          <h2>Jobs</h2>
+          <span id="jobCount" class="muted">0</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Job</th>
+                <th>Status</th>
+                <th>PID</th>
+                <th>Duration</th>
+                <th>Frequency</th>
+                <th>Reason</th>
+                <th>Artifacts</th>
+              </tr>
+            </thead>
+            <tbody id="jobsBody"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <script src="/ui/static/app.js"></script>
+  </body>
+</html>

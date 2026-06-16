@@ -86,6 +86,7 @@ class PerfCollector:
                 "perf_script": str(perf_script),
                 "folded_stack": str(folded_stack),
                 "flamegraph": str(flamegraph),
+                "summary": str(summary_path),
             },
         )
         summary_path.write_text(json.dumps(summary.to_dict(), indent=2), encoding="utf-8")

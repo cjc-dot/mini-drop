@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .agent_store import AgentRegistry
@@ -25,13 +28,26 @@ class AgentHeartbeatRequest(BaseModel):
 
 def create_app(runtime_dir: str | None = None) -> FastAPI:
     resolved_runtime_dir = runtime_dir or os.environ.get("MINIDROP_RUNTIME", "~/mini-drop-runtime")
+    runtime_root = Path(resolved_runtime_dir).expanduser().resolve()
     store = ServerJobStore(resolved_runtime_dir)
     agents = AgentRegistry(resolved_runtime_dir)
     app = FastAPI(title="Mini-Drop API Server")
+    frontend_dir = Path(__file__).resolve().parents[2] / "web_frontend"
+
+    if frontend_dir.exists():
+        app.mount("/ui/static", StaticFiles(directory=str(frontend_dir)), name="ui-static")
 
     @app.get("/api/health")
     def health() -> dict:
         return {"service": "Mini-Drop API Server", "status": "running"}
+
+    @app.get("/ui")
+    @app.get("/ui/")
+    def web_ui() -> FileResponse:
+        index_file = frontend_dir / "index.html"
+        if not index_file.exists():
+            raise HTTPException(status_code=404, detail="web frontend not found")
+        return FileResponse(index_file)
 
     @app.post("/api/jobs", status_code=201)
     def create_job(request: CreateJobRequest) -> dict:
@@ -58,6 +74,23 @@ def create_app(runtime_dir: str | None = None) -> FastAPI:
         if store.get_job(job_id) is None:
             raise HTTPException(status_code=404, detail="job not found")
         return store.get_events(job_id)
+
+    @app.get("/api/jobs/{job_id}/artifacts/{artifact_name}")
+    def get_job_artifact(job_id: str, artifact_name: Literal["flamegraph", "summary"]) -> FileResponse:
+        job = store.get_job(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="job not found")
+        artifact_path = job.get("artifacts", {}).get(artifact_name)
+        if artifact_path is None:
+            raise HTTPException(status_code=404, detail="artifact not found")
+        path = Path(artifact_path).expanduser().resolve()
+        try:
+            path.relative_to(runtime_root)
+        except ValueError as exc:
+            raise HTTPException(status_code=403, detail="artifact outside runtime dir") from exc
+        if not path.exists() or not path.is_file():
+            raise HTTPException(status_code=404, detail="artifact file not found")
+        return FileResponse(path)
 
     @app.post("/api/agents/{agent_id}/heartbeat")
     def agent_heartbeat(agent_id: str, request: AgentHeartbeatRequest) -> dict:
