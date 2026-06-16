@@ -10,8 +10,11 @@ DURATION ?= 10
 FREQUENCY ?= 99
 API_HOST ?= 127.0.0.1
 API_PORT ?= 8000
+AGENT_ID ?= local-agent
+HEARTBEAT_INTERVAL ?= 5
+HEARTBEAT_COUNT ?= 1
 
-.PHONY: init build-workload collect agent-run agent-run-pending api-run test clean-runtime demo agent-demo
+.PHONY: init build-workload collect agent-run agent-run-pending agent-heartbeat api-run test clean-runtime demo agent-demo
 
 init:
 	mkdir -p $(MINIDROP_RUNTIME)/builds
@@ -46,6 +49,13 @@ agent-run-pending:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m minidrop_agent run-pending \
 		--runtime-dir $(MINIDROP_RUNTIME) \
 		$(if $(PENDING_JOB_ID),--job-id $(PENDING_JOB_ID),)
+
+agent-heartbeat:
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m minidrop_agent heartbeat \
+		--server-url http://$(API_HOST):$(API_PORT) \
+		--agent-id $(AGENT_ID) \
+		--interval $(HEARTBEAT_INTERVAL) \
+		--count $(HEARTBEAT_COUNT)
 
 api-run: init
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m minidrop_apiserver \

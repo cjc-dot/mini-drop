@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import json
 
+from .heartbeat import HeartbeatClient, result_to_dict
 from .job import JobSpec
 from .runner import LocalAgent
 
@@ -10,6 +12,13 @@ def _positive_int(value: str) -> int:
     number = int(value)
     if number <= 0:
         raise argparse.ArgumentTypeError("value must be positive")
+    return number
+
+
+def _non_negative_int(value: str) -> int:
+    number = int(value)
+    if number < 0:
+        raise argparse.ArgumentTypeError("value must be zero or positive")
     return number
 
 
@@ -28,6 +37,13 @@ def build_parser() -> argparse.ArgumentParser:
     run_pending = subcommands.add_parser("run-pending", help="run one pending job from the runtime job store")
     run_pending.add_argument("--runtime-dir", default="~/mini-drop-runtime")
     run_pending.add_argument("--job-id", default=None)
+
+    heartbeat = subcommands.add_parser("heartbeat", help="send heartbeat messages to the API server")
+    heartbeat.add_argument("--server-url", default="http://127.0.0.1:8000")
+    heartbeat.add_argument("--agent-id", default="local-agent")
+    heartbeat.add_argument("--interval", default=5, type=_positive_int)
+    heartbeat.add_argument("--count", default=1, type=_non_negative_int)
+    heartbeat.add_argument("--version", default="0.1.0")
 
     return parser
 
@@ -56,5 +72,16 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Job {result.job_id} finished with status {result.status}")
         print(f"Job metadata: {result.job_file}")
         return 0 if result.status == "DONE" else 1
+
+    if args.command == "heartbeat":
+        results = HeartbeatClient(args.server_url).send_loop(
+            agent_id=args.agent_id,
+            interval_seconds=args.interval,
+            count=args.count,
+            version=args.version,
+        )
+        for result in results:
+            print(json.dumps(result_to_dict(result), indent=2))
+        return 0
 
     raise AssertionError(f"unhandled command: {args.command}")

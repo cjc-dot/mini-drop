@@ -6,6 +6,7 @@ from typing import Literal
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
+from .agent_store import AgentRegistry
 from .store import ServerJobStore
 
 
@@ -16,8 +17,16 @@ class CreateJobRequest(BaseModel):
     collector: Literal["perf"] = "perf"
 
 
+class AgentHeartbeatRequest(BaseModel):
+    hostname: str = Field(min_length=1)
+    pid: int = Field(gt=0)
+    version: str = Field(default="0.1.0", min_length=1)
+
+
 def create_app(runtime_dir: str | None = None) -> FastAPI:
-    store = ServerJobStore(runtime_dir or os.environ.get("MINIDROP_RUNTIME", "~/mini-drop-runtime"))
+    resolved_runtime_dir = runtime_dir or os.environ.get("MINIDROP_RUNTIME", "~/mini-drop-runtime")
+    store = ServerJobStore(resolved_runtime_dir)
+    agents = AgentRegistry(resolved_runtime_dir)
     app = FastAPI(title="Mini-Drop API Server")
 
     @app.get("/api/health")
@@ -49,5 +58,31 @@ def create_app(runtime_dir: str | None = None) -> FastAPI:
         if store.get_job(job_id) is None:
             raise HTTPException(status_code=404, detail="job not found")
         return store.get_events(job_id)
+
+    @app.post("/api/agents/{agent_id}/heartbeat")
+    def agent_heartbeat(agent_id: str, request: AgentHeartbeatRequest) -> dict:
+        return agents.record_heartbeat(
+            agent_id=agent_id,
+            hostname=request.hostname,
+            pid=request.pid,
+            version=request.version,
+        )
+
+    @app.get("/api/agents")
+    def list_agents(offline_after_seconds: int = 30) -> list[dict]:
+        return agents.list_agents(offline_after_seconds=offline_after_seconds)
+
+    @app.get("/api/agents/{agent_id}")
+    def get_agent(agent_id: str, offline_after_seconds: int = 30) -> dict:
+        agent = agents.get_agent(agent_id, offline_after_seconds=offline_after_seconds)
+        if agent is None:
+            raise HTTPException(status_code=404, detail="agent not found")
+        return agent
+
+    @app.get("/api/agents/{agent_id}/events")
+    def get_agent_events(agent_id: str) -> list[dict]:
+        if agents.get_agent(agent_id) is None:
+            raise HTTPException(status_code=404, detail="agent not found")
+        return agents.get_agent_events(agent_id)
 
     return app

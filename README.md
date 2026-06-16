@@ -42,6 +42,13 @@ After creating a job through the API, the local Agent can consume one pending jo
 make agent-run-pending
 ```
 
+The Agent can also report heartbeat status to the API server:
+
+```bash
+make agent-heartbeat AGENT_ID=local-agent HEARTBEAT_COUNT=1
+curl http://127.0.0.1:8000/api/agents
+```
+
 Artifacts are written outside the repository by default:
 
 ```text

@@ -56,6 +56,7 @@ class ServerJobStore:
             return []
         return [json.loads(line) for line in events_file.read_text(encoding="utf-8").splitlines() if line]
 
+
     def _write_job(self, job: dict) -> None:
         job["updated_at"] = self._now()
         self._job_file(job["job_id"]).write_text(json.dumps(job, indent=2), encoding="utf-8")
@@ -78,6 +79,7 @@ class ServerJobStore:
 
     def _events_file(self, job_id: str) -> Path:
         return self._job_dir(job_id) / "events.jsonl"
+
 
     @staticmethod
     def _now() -> str:
