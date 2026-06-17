@@ -1,11 +1,18 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
+import time
 from uuid import uuid4
 
 from .job import JobEvent, JobSpec
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - Windows fallback for local editing.
+    fcntl = None
 
 
 class JobStore:
@@ -57,6 +64,19 @@ class JobStore:
             return None
         return self._spec_from_job(job)
 
+    def claim_pending_spec(self, job_id: str | None = None) -> JobSpec | None:
+        if job_id is not None:
+            return self._claim_one(job_id)
+
+        if not self.jobs_dir.exists():
+            return None
+
+        for job_file in sorted(self.jobs_dir.glob("*/job.json")):
+            claimed = self._claim_one(job_file.parent.name)
+            if claimed is not None:
+                return claimed
+        return None
+
     def init_job(self, spec: JobSpec) -> None:
         self.job_dir(spec.job_id).mkdir(parents=True, exist_ok=True)
         self.write_job(spec=spec, status="PENDING", reason="job accepted by local agent")
@@ -95,6 +115,45 @@ class JobStore:
     def append_event(self, event: JobEvent) -> None:
         with self.events_file(event.job_id).open("a", encoding="utf-8") as stream:
             stream.write(json.dumps(event.to_dict()) + "\n")
+
+    def _claim_one(self, job_id: str) -> JobSpec | None:
+        with self._job_lock(job_id):
+            job = self.read_job(job_id)
+            if job is None or job.get("status") != "PENDING":
+                return None
+
+            spec = self._spec_from_job(job)
+            self.write_job(spec=spec, status="RUNNING", reason="job claimed by local agent")
+            self.append_event(JobEvent.create(spec.job_id, "RUNNING", "job claimed by local agent"))
+            return spec
+
+    @contextmanager
+    def _job_lock(self, job_id: str):
+        lock_file = self.job_dir(job_id) / "job.lock"
+        lock_file.parent.mkdir(parents=True, exist_ok=True)
+
+        if fcntl is not None:
+            with lock_file.open("w", encoding="utf-8") as stream:
+                fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
+                try:
+                    yield
+                finally:
+                    fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+            return
+
+        while True:
+            try:
+                lock_fd = os.open(lock_file, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                break
+            except FileExistsError:
+                time.sleep(0.01)
+        try:
+            with os.fdopen(lock_fd, "w", encoding="utf-8") as stream:
+                stream.write(str(os.getpid()))
+            yield
+        finally:
+            if lock_file.exists():
+                lock_file.unlink()
 
     @staticmethod
     def _spec_from_job(job: dict) -> JobSpec:

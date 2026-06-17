@@ -20,13 +20,14 @@ class LocalAgent:
         self.store = JobStore(str(self.runtime_dir))
         self.collector = collector or PerfCollector()
 
-    def run(self, spec: JobSpec, initialize: bool = True) -> JobResult:
+    def run(self, spec: JobSpec, initialize: bool = True, mark_running: bool = True) -> JobResult:
         output_dir = self.runtime_dir / "profiles" / spec.job_id
         if initialize:
             self.store.init_job(spec)
 
         try:
-            self.store.transition(spec, "RUNNING", "collector started")
+            if mark_running:
+                self.store.transition(spec, "RUNNING", "collector started")
             summary = self.collector.collect(
                 pid=spec.pid,
                 duration_seconds=spec.duration_seconds,
@@ -54,12 +55,7 @@ class LocalAgent:
             )
 
     def run_pending_once(self, job_id: str | None = None) -> JobResult | None:
-        if job_id is not None:
-            spec = self.store.get_pending_spec(job_id)
-        else:
-            pending = self.store.list_pending_specs(limit=1)
-            spec = pending[0] if pending else None
-
+        spec = self.store.claim_pending_spec(job_id=job_id)
         if spec is None:
             return None
-        return self.run(spec, initialize=False)
+        return self.run(spec, initialize=False, mark_running=False)
