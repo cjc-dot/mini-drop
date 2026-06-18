@@ -27,15 +27,27 @@ class LocalAgent:
 
         try:
             if mark_running:
-                self.store.transition(spec, "RUNNING", "collector started")
+                self.store.transition(spec, "RUNNING", "collector started", expected_status="PENDING")
             summary = self.collector.collect(
                 pid=spec.pid,
                 duration_seconds=spec.duration_seconds,
                 sample_frequency=spec.sample_frequency,
                 output_dir=str(output_dir),
             )
-            self.store.transition(spec, "UPLOADING", "local artifacts registered", artifacts=summary.artifacts)
-            self.store.transition(spec, "DONE", "job completed successfully", artifacts=summary.artifacts)
+            self.store.transition(
+                spec,
+                "UPLOADING",
+                "local artifacts registered",
+                artifacts=summary.artifacts,
+                expected_status="RUNNING",
+            )
+            self.store.transition(
+                spec,
+                "DONE",
+                "job completed successfully",
+                artifacts=summary.artifacts,
+                expected_status="UPLOADING",
+            )
             return JobResult(
                 job_id=spec.job_id,
                 status="DONE",

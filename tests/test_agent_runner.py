@@ -5,7 +5,7 @@ from pathlib import Path
 
 from minidrop_agent.job import JobSpec
 from minidrop_agent.runner import LocalAgent
-from minidrop_agent.store import JobStore
+from minidrop_agent.store import InvalidJobTransition, JobStore
 from minidrop_analysis.perf import ProfileSummary
 from minidrop_apiserver.store import ServerJobStore
 
@@ -117,6 +117,33 @@ def test_claim_pending_spec_returns_none_for_non_pending_job(tmp_path: Path) -> 
     assert store.claim_pending_spec(job_id=pending_job["job_id"]) is not None
 
     assert store.claim_pending_spec(job_id=pending_job["job_id"]) is None
+
+
+def test_transition_job_rejects_unexpected_status(tmp_path: Path) -> None:
+    server_store = ServerJobStore(str(tmp_path))
+    pending_job = server_store.create_job(pid=1234, duration_seconds=10, sample_frequency=99)
+    store = JobStore(str(tmp_path))
+    assert store.claim_pending_spec(job_id=pending_job["job_id"]) is not None
+
+    try:
+        store.transition_job(
+            pending_job["job_id"],
+            "UPLOADING",
+            "artifacts ready",
+            expected_status="PENDING",
+        )
+    except InvalidJobTransition:
+        pass
+    else:
+        raise AssertionError("transition_job should reject an unexpected current status")
+
+    job = server_store.get_job(pending_job["job_id"])
+    assert job["status"] == "RUNNING"
+    events = [
+        json.loads(line)["status"]
+        for line in (tmp_path / "jobs" / pending_job["job_id"] / "events.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert events == ["PENDING", "RUNNING"]
 
 
 def test_local_agent_does_not_execute_already_claimed_job(tmp_path: Path) -> None:

@@ -15,6 +15,10 @@ except ImportError:  # pragma: no cover - Windows fallback for local editing.
     fcntl = None
 
 
+class InvalidJobTransition(RuntimeError):
+    pass
+
+
 class JobStore:
     def __init__(self, runtime_dir: str) -> None:
         self.runtime_dir = Path(runtime_dir).expanduser().resolve()
@@ -82,13 +86,52 @@ class JobStore:
         self.write_job(spec=spec, status="PENDING", reason="job accepted by local agent")
         self.append_event(JobEvent.create(spec.job_id, "PENDING", "job accepted by local agent"))
 
-    def transition(self, spec: JobSpec, status: str, reason: str, artifacts: dict[str, str] | None = None) -> None:
-        self.write_job(spec=spec, status=status, reason=reason, artifacts=artifacts or {})
-        self.append_event(JobEvent.create(spec.job_id, status, reason))
+    def transition(
+        self,
+        spec: JobSpec,
+        status: str,
+        reason: str,
+        artifacts: dict[str, str] | None = None,
+        expected_status: str | tuple[str, ...] | None = None,
+    ) -> None:
+        self.transition_job(
+            spec.job_id,
+            status,
+            reason,
+            artifacts=artifacts,
+            expected_status=expected_status,
+        )
 
     def fail(self, spec: JobSpec, reason: str, error_message: str) -> None:
-        self.write_job(spec=spec, status="FAILED", reason=reason, error_message=error_message)
-        self.append_event(JobEvent.create(spec.job_id, "FAILED", reason))
+        self.transition_job(
+            spec.job_id,
+            "FAILED",
+            reason,
+            error_message=error_message,
+            expected_status=("PENDING", "RUNNING", "UPLOADING"),
+        )
+
+    def transition_job(
+        self,
+        job_id: str,
+        status: str,
+        reason: str,
+        artifacts: dict[str, str] | None = None,
+        error_message: str | None = None,
+        expected_status: str | tuple[str, ...] | None = None,
+    ) -> dict:
+        with self._job_lock(job_id):
+            job = self.read_job(job_id)
+            if job is None:
+                raise FileNotFoundError(f"job not found: {job_id}")
+            return self._transition_job_locked(
+                job=job,
+                status=status,
+                reason=reason,
+                artifacts=artifacts,
+                error_message=error_message,
+                expected_status=expected_status,
+            )
 
     def write_job(
         self,
@@ -123,9 +166,48 @@ class JobStore:
                 return None
 
             spec = self._spec_from_job(job)
-            self.write_job(spec=spec, status="RUNNING", reason="job claimed by local agent")
-            self.append_event(JobEvent.create(spec.job_id, "RUNNING", "job claimed by local agent"))
+            self._transition_job_locked(
+                job=job,
+                status="RUNNING",
+                reason="job claimed by local agent",
+                expected_status="PENDING",
+            )
             return spec
+
+    def _transition_job_locked(
+        self,
+        job: dict,
+        status: str,
+        reason: str,
+        artifacts: dict[str, str] | None = None,
+        error_message: str | None = None,
+        expected_status: str | tuple[str, ...] | None = None,
+    ) -> dict:
+        job_id = str(job["job_id"])
+        current_status = job.get("status")
+        if expected_status is not None:
+            expected = (expected_status,) if isinstance(expected_status, str) else expected_status
+            if current_status not in expected:
+                expected_text = ", ".join(expected)
+                raise InvalidJobTransition(
+                    f"cannot transition {job_id} from {current_status} to {status}; expected {expected_text}"
+                )
+
+        spec = self._spec_from_job(job)
+        event = JobEvent.create(job_id, status, reason)
+        payload = {
+            "job_id": job_id,
+            "status": status,
+            "reason": reason,
+            "spec": spec.to_dict(),
+            "artifacts": artifacts if artifacts is not None else job.get("artifacts", {}),
+            "error_message": error_message,
+            "created_at": job.get("created_at") or event.created_at,
+            "updated_at": event.created_at,
+        }
+        self._write_json_atomic(self.job_file(job_id), payload)
+        self.append_event(event)
+        return payload
 
     @contextmanager
     def _job_lock(self, job_id: str):
