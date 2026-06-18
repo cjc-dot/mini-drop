@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 
+from .daemon import AgentDaemon
 from .heartbeat import HeartbeatClient, result_to_dict
 from .job import JobSpec
 from .runner import LocalAgent
@@ -45,6 +46,15 @@ def build_parser() -> argparse.ArgumentParser:
     heartbeat.add_argument("--count", default=1, type=_non_negative_int)
     heartbeat.add_argument("--version", default="0.1.0")
 
+    daemon = subcommands.add_parser("daemon", help="run heartbeat and pending-job polling loops")
+    daemon.add_argument("--runtime-dir", default="~/mini-drop-runtime")
+    daemon.add_argument("--server-url", default="http://127.0.0.1:8000")
+    daemon.add_argument("--agent-id", default="local-agent")
+    daemon.add_argument("--heartbeat-interval", default=5, type=_positive_int)
+    daemon.add_argument("--poll-interval", default=2, type=_positive_int)
+    daemon.add_argument("--max-jobs", default=0, type=_non_negative_int)
+    daemon.add_argument("--version", default="0.1.0")
+
     return parser
 
 
@@ -86,6 +96,25 @@ def main(argv: list[str] | None = None) -> int:
             return 130
         for result in results:
             print(json.dumps(result_to_dict(result), indent=2))
+        return 0
+
+    if args.command == "daemon":
+        daemon = AgentDaemon(
+            runtime_dir=args.runtime_dir,
+            server_url=args.server_url,
+            agent_id=args.agent_id,
+            heartbeat_interval_seconds=args.heartbeat_interval,
+            poll_interval_seconds=args.poll_interval,
+            version=args.version,
+            on_job_result=lambda result: print(f"Job {result.job_id} finished with status {result.status}", flush=True),
+        )
+        try:
+            completed_jobs = daemon.run_forever(max_jobs=args.max_jobs or None)
+        except KeyboardInterrupt:
+            daemon.stop()
+            print("Agent daemon stopped by user")
+            return 130
+        print(f"Agent daemon stopped after completing {completed_jobs} job(s)")
         return 0
 
     raise AssertionError(f"unhandled command: {args.command}")
