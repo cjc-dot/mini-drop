@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import Protocol
 
@@ -66,8 +67,20 @@ class LocalAgent:
                 error_message=str(exc),
             )
 
-    def run_pending_once(self, job_id: str | None = None) -> JobResult | None:
-        spec = self.store.claim_pending_spec(job_id=job_id)
+    def run_pending_once(
+        self,
+        job_id: str | None = None,
+        *,
+        validate_pid: bool = False,
+        max_pending_age_seconds: int | None = None,
+        on_skip: Callable[[str, str, str | None], None] | None = None,
+    ) -> JobResult | None:
+        spec = self.store.claim_pending_spec(
+            job_id=job_id,
+            validate_pid=validate_pid,
+            max_pending_age_seconds=max_pending_age_seconds,
+            on_skip=on_skip,
+        )
         if spec is None:
             return None
         return self.run(spec, initialize=False, mark_running=False)

@@ -53,6 +53,8 @@ def build_parser() -> argparse.ArgumentParser:
     daemon.add_argument("--heartbeat-interval", default=5, type=_positive_int)
     daemon.add_argument("--poll-interval", default=2, type=_positive_int)
     daemon.add_argument("--max-jobs", default=0, type=_non_negative_int)
+    daemon.add_argument("--max-pending-age", default=300, type=_non_negative_int)
+    daemon.add_argument("--disable-pid-check", action="store_true")
     daemon.add_argument("--version", default="0.1.0")
 
     return parser
@@ -105,8 +107,14 @@ def main(argv: list[str] | None = None) -> int:
             agent_id=args.agent_id,
             heartbeat_interval_seconds=args.heartbeat_interval,
             poll_interval_seconds=args.poll_interval,
+            max_pending_age_seconds=args.max_pending_age or None,
+            validate_pid=not args.disable_pid_check,
             version=args.version,
             on_job_result=lambda result: print(f"Job {result.job_id} finished with status {result.status}", flush=True),
+            on_job_skip=lambda job_id, reason, error: print(
+                f"Skipped {job_id}: {reason}" + (f" ({error})" if error else ""),
+                flush=True,
+            ),
         )
         try:
             completed_jobs = daemon.run_forever(max_jobs=args.max_jobs or None)

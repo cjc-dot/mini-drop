@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
 
@@ -117,6 +118,57 @@ def test_claim_pending_spec_returns_none_for_non_pending_job(tmp_path: Path) -> 
     assert store.claim_pending_spec(job_id=pending_job["job_id"]) is not None
 
     assert store.claim_pending_spec(job_id=pending_job["job_id"]) is None
+
+
+def test_claim_pending_spec_marks_missing_pid_failed_and_skips_to_next_pending_job(tmp_path: Path) -> None:
+    store = JobStore(str(tmp_path), pid_exists=lambda pid: pid == 2222)
+    missing_pid = JobSpec(job_id="job-001", pid=1111, duration_seconds=10, sample_frequency=99)
+    live_pid = JobSpec(job_id="job-002", pid=2222, duration_seconds=10, sample_frequency=99)
+    store.init_job(missing_pid)
+    store.init_job(live_pid)
+    skipped = []
+
+    claimed = store.claim_pending_spec(validate_pid=True, on_skip=lambda job_id, reason, error: skipped.append((job_id, reason, error)))
+
+    assert claimed is not None
+    assert claimed.job_id == "job-002"
+    assert skipped == [("job-001", "target process not found before claim", "pid 1111 does not exist")]
+    missing_job = store.read_job("job-001")
+    assert missing_job["status"] == "FAILED"
+    assert missing_job["reason"] == "target process not found before claim"
+    assert missing_job["error_message"] == "pid 1111 does not exist"
+    live_job = store.read_job("job-002")
+    assert live_job["status"] == "RUNNING"
+
+
+def test_claim_pending_spec_marks_stale_pending_job_failed_and_skips_to_next_pending_job(tmp_path: Path) -> None:
+    store = JobStore(str(tmp_path), pid_exists=lambda pid: True)
+    stale = JobSpec(job_id="job-001", pid=1111, duration_seconds=10, sample_frequency=99)
+    fresh = JobSpec(job_id="job-002", pid=2222, duration_seconds=10, sample_frequency=99)
+    store.init_job(stale)
+    store.init_job(fresh)
+
+    stale_job = store.read_job("job-001")
+    stale_job["created_at"] = (datetime.now(timezone.utc) - timedelta(seconds=600)).isoformat()
+    stale_job["updated_at"] = stale_job["created_at"]
+    store._write_json_atomic(store.job_file("job-001"), stale_job)
+    skipped = []
+
+    claimed = store.claim_pending_spec(
+        validate_pid=True,
+        max_pending_age_seconds=300,
+        on_skip=lambda job_id, reason, error: skipped.append((job_id, reason, error)),
+    )
+
+    assert claimed is not None
+    assert claimed.job_id == "job-002"
+    assert skipped == [
+        ("job-001", "pending job expired before claim", "job stayed PENDING for more than 300 seconds")
+    ]
+    expired_job = store.read_job("job-001")
+    assert expired_job["status"] == "FAILED"
+    assert expired_job["reason"] == "pending job expired before claim"
+    assert expired_job["error_message"] == "job stayed PENDING for more than 300 seconds"
 
 
 def test_transition_job_rejects_unexpected_status(tmp_path: Path) -> None:

@@ -15,6 +15,8 @@ HEARTBEAT_INTERVAL ?= 5
 HEARTBEAT_COUNT ?= 1
 POLL_INTERVAL ?= 2
 MAX_JOBS ?= 0
+MAX_PENDING_AGE ?= 300
+DISABLE_PID_CHECK ?= 0
 
 .PHONY: init build-workload collect agent-run agent-run-pending agent-heartbeat agent-daemon api-run test clean-runtime demo agent-demo
 
@@ -66,7 +68,9 @@ agent-daemon:
 		--agent-id $(AGENT_ID) \
 		--heartbeat-interval $(HEARTBEAT_INTERVAL) \
 		--poll-interval $(POLL_INTERVAL) \
-		--max-jobs $(MAX_JOBS)
+		--max-jobs $(MAX_JOBS) \
+		--max-pending-age $(MAX_PENDING_AGE) \
+		$(if $(filter 1 true yes,$(DISABLE_PID_CHECK)),--disable-pid-check,)
 
 api-run: init
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m minidrop_apiserver \

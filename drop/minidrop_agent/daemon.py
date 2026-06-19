@@ -11,7 +11,14 @@ from .runner import LocalAgent
 
 
 class PendingJobRunner(Protocol):
-    def run_pending_once(self, job_id: str | None = None) -> JobResult | None:
+    def run_pending_once(
+        self,
+        job_id: str | None = None,
+        *,
+        validate_pid: bool = False,
+        max_pending_age_seconds: int | None = None,
+        on_skip: Callable[[str, str, str | None], None] | None = None,
+    ) -> JobResult | None:
         ...
 
 
@@ -28,19 +35,25 @@ class AgentDaemon:
         agent_id: str = "local-agent",
         heartbeat_interval_seconds: int = 5,
         poll_interval_seconds: int = 2,
+        max_pending_age_seconds: int | None = 300,
+        validate_pid: bool = True,
         version: str = "0.1.0",
         agent: PendingJobRunner | None = None,
         heartbeat_client: HeartbeatSender | None = None,
         on_job_result: Callable[[JobResult], None] | None = None,
+        on_job_skip: Callable[[str, str, str | None], None] | None = None,
         sleep_fn=time.sleep,
     ) -> None:
         self.agent_id = agent_id
         self.heartbeat_interval_seconds = heartbeat_interval_seconds
         self.poll_interval_seconds = poll_interval_seconds
+        self.max_pending_age_seconds = max_pending_age_seconds
+        self.validate_pid = validate_pid
         self.version = version
         self.agent = agent or LocalAgent(runtime_dir=runtime_dir)
         self.heartbeat_client = heartbeat_client or HeartbeatClient(server_url)
         self.on_job_result = on_job_result
+        self.on_job_skip = on_job_skip
         self.sleep_fn = sleep_fn
         self._stop_event = threading.Event()
         self._heartbeat_thread: threading.Thread | None = None
@@ -50,7 +63,11 @@ class AgentDaemon:
 
     def run_once(self) -> JobResult | None:
         self.send_heartbeat_once()
-        return self.agent.run_pending_once()
+        return self.agent.run_pending_once(
+            validate_pid=self.validate_pid,
+            max_pending_age_seconds=self.max_pending_age_seconds,
+            on_skip=self.on_job_skip,
+        )
 
     def send_heartbeat_once(self) -> HeartbeatResult:
         try:
@@ -69,7 +86,11 @@ class AgentDaemon:
         self._start_heartbeat_thread()
         try:
             while not self._stop_event.is_set():
-                result = self.agent.run_pending_once()
+                result = self.agent.run_pending_once(
+                    validate_pid=self.validate_pid,
+                    max_pending_age_seconds=self.max_pending_age_seconds,
+                    on_skip=self.on_job_skip,
+                )
                 if result is not None:
                     if self.on_job_result is not None:
                         self.on_job_result(result)

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
 import time
+from typing import Callable
 from uuid import uuid4
 
 from .job import JobEvent, JobSpec
@@ -20,9 +22,10 @@ class InvalidJobTransition(RuntimeError):
 
 
 class JobStore:
-    def __init__(self, runtime_dir: str) -> None:
+    def __init__(self, runtime_dir: str, pid_exists: Callable[[int], bool] | None = None) -> None:
         self.runtime_dir = Path(runtime_dir).expanduser().resolve()
         self.jobs_dir = self.runtime_dir / "jobs"
+        self.pid_exists = pid_exists or self._pid_exists
 
     def job_dir(self, job_id: str) -> Path:
         return self.jobs_dir / job_id
@@ -68,15 +71,32 @@ class JobStore:
             return None
         return self._spec_from_job(job)
 
-    def claim_pending_spec(self, job_id: str | None = None) -> JobSpec | None:
+    def claim_pending_spec(
+        self,
+        job_id: str | None = None,
+        *,
+        validate_pid: bool = False,
+        max_pending_age_seconds: int | None = None,
+        on_skip: Callable[[str, str, str | None], None] | None = None,
+    ) -> JobSpec | None:
         if job_id is not None:
-            return self._claim_one(job_id)
+            return self._claim_one(
+                job_id,
+                validate_pid=validate_pid,
+                max_pending_age_seconds=max_pending_age_seconds,
+                on_skip=on_skip,
+            )
 
         if not self.jobs_dir.exists():
             return None
 
         for job_file in sorted(self.jobs_dir.glob("*/job.json")):
-            claimed = self._claim_one(job_file.parent.name)
+            claimed = self._claim_one(
+                job_file.parent.name,
+                validate_pid=validate_pid,
+                max_pending_age_seconds=max_pending_age_seconds,
+                on_skip=on_skip,
+            )
             if claimed is not None:
                 return claimed
         return None
@@ -159,20 +179,54 @@ class JobStore:
         with self.events_file(event.job_id).open("a", encoding="utf-8") as stream:
             stream.write(json.dumps(event.to_dict()) + "\n")
 
-    def _claim_one(self, job_id: str) -> JobSpec | None:
+    def _claim_one(
+        self,
+        job_id: str,
+        *,
+        validate_pid: bool = False,
+        max_pending_age_seconds: int | None = None,
+        on_skip: Callable[[str, str, str | None], None] | None = None,
+    ) -> JobSpec | None:
+        skip_notice: tuple[str, str, str | None] | None = None
         with self._job_lock(job_id):
             job = self.read_job(job_id)
             if job is None or job.get("status") != "PENDING":
                 return None
 
             spec = self._spec_from_job(job)
-            self._transition_job_locked(
-                job=job,
-                status="RUNNING",
-                reason="job claimed by local agent",
-                expected_status="PENDING",
-            )
-            return spec
+            if self._is_pending_expired(job, max_pending_age_seconds):
+                reason = "pending job expired before claim"
+                error_message = f"job stayed PENDING for more than {max_pending_age_seconds} seconds"
+                self._transition_job_locked(
+                    job=job,
+                    status="FAILED",
+                    reason=reason,
+                    error_message=error_message,
+                    expected_status="PENDING",
+                )
+                skip_notice = (job_id, reason, error_message)
+            elif validate_pid and not self.pid_exists(spec.pid):
+                reason = "target process not found before claim"
+                error_message = f"pid {spec.pid} does not exist"
+                self._transition_job_locked(
+                    job=job,
+                    status="FAILED",
+                    reason=reason,
+                    error_message=error_message,
+                    expected_status="PENDING",
+                )
+                skip_notice = (job_id, reason, error_message)
+            if skip_notice is None:
+                self._transition_job_locked(
+                    job=job,
+                    status="RUNNING",
+                    reason="job claimed by local agent",
+                    expected_status="PENDING",
+                )
+                return spec
+        if skip_notice is not None and on_skip is not None:
+            on_skip(*skip_notice)
+        return None
 
     def _transition_job_locked(
         self,
@@ -247,6 +301,37 @@ class JobStore:
             sample_frequency=int(spec["sample_frequency"]),
             collector=spec.get("collector", "perf"),
         )
+
+    @staticmethod
+    def _is_pending_expired(job: dict, max_pending_age_seconds: int | None) -> bool:
+        if max_pending_age_seconds is None:
+            return False
+        created_at = job.get("created_at")
+        if not created_at:
+            return False
+        try:
+            created = datetime.fromisoformat(str(created_at).replace("Z", "+00:00"))
+        except ValueError:
+            return False
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=timezone.utc)
+        age_seconds = (datetime.now(timezone.utc) - created).total_seconds()
+        return age_seconds > max_pending_age_seconds
+
+    @staticmethod
+    def _pid_exists(pid: int) -> bool:
+        if pid <= 0:
+            return False
+        proc_path = Path("/proc") / str(pid)
+        if Path("/proc").exists():
+            return proc_path.exists()
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        return True
 
     @staticmethod
     def _write_json_atomic(path: Path, payload: dict) -> None:
