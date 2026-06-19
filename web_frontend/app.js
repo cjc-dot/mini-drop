@@ -64,13 +64,17 @@ function renderJobs(jobs) {
 
   jobsBody.innerHTML = jobs.map((job) => {
     const spec = job.spec || {};
-    const flamegraphLink = job.artifacts && job.artifacts.flamegraph
-      ? `<a href="/api/jobs/${encodeURIComponent(job.job_id)}/artifacts/flamegraph" target="_blank">flamegraph</a>`
-      : "-";
-    const summaryLink = job.artifacts && job.artifacts.summary
-      ? `<a href="/api/jobs/${encodeURIComponent(job.job_id)}/artifacts/summary" target="_blank">summary</a>`
-      : "";
-    const artifacts = summaryLink ? `${flamegraphLink} ${summaryLink}` : flamegraphLink;
+    const artifactLinks = [];
+    if (job.artifacts && job.artifacts.flamegraph) {
+      artifactLinks.push(`<a href="/api/jobs/${encodeURIComponent(job.job_id)}/artifacts/flamegraph" target="_blank">flamegraph</a>`);
+    }
+    if (job.artifacts && job.artifacts.hotspots) {
+      artifactLinks.push(`<a href="/api/jobs/${encodeURIComponent(job.job_id)}/artifacts/hotspots" target="_blank">hotspots</a>`);
+    }
+    if (job.artifacts && job.artifacts.summary) {
+      artifactLinks.push(`<a href="/api/jobs/${encodeURIComponent(job.job_id)}/artifacts/summary" target="_blank">summary</a>`);
+    }
+    const artifacts = artifactLinks.length ? artifactLinks.join(" ") : "-";
     return `
       <tr>
         <td class="mono">${escapeHtml(job.job_id)}</td>

@@ -34,7 +34,7 @@ def test_web_ui_route_serves_index(tmp_path: Path) -> None:
     assert "Mini-Drop" in response.text
 
 
-def test_artifact_route_serves_flamegraph_inside_runtime(tmp_path: Path) -> None:
+def test_artifact_route_serves_known_artifacts_inside_runtime(tmp_path: Path) -> None:
     runtime_dir = tmp_path / "runtime"
     profile_dir = runtime_dir / "profiles" / "job-1"
     job_dir = runtime_dir / "jobs" / "job-1"
@@ -43,6 +43,8 @@ def test_artifact_route_serves_flamegraph_inside_runtime(tmp_path: Path) -> None
 
     flamegraph = profile_dir / "flamegraph.svg"
     flamegraph.write_text("<svg>ok</svg>", encoding="utf-8")
+    hotspots = profile_dir / "hotspots.json"
+    hotspots.write_text('{"hotspots":[]}', encoding="utf-8")
     job = {
         "job_id": "job-1",
         "status": "DONE",
@@ -53,7 +55,7 @@ def test_artifact_route_serves_flamegraph_inside_runtime(tmp_path: Path) -> None
             "sample_frequency": 99,
             "collector": "perf",
         },
-        "artifacts": {"flamegraph": str(flamegraph)},
+        "artifacts": {"flamegraph": str(flamegraph), "hotspots": str(hotspots)},
         "reason": "job completed successfully",
         "error_message": None,
         "created_at": "2026-06-16T00:00:00+00:00",
@@ -63,9 +65,12 @@ def test_artifact_route_serves_flamegraph_inside_runtime(tmp_path: Path) -> None
     client = TestClient(create_app(str(runtime_dir)))
 
     response = client.get("/api/jobs/job-1/artifacts/flamegraph")
+    hotspots_response = client.get("/api/jobs/job-1/artifacts/hotspots")
 
     assert response.status_code == 200
     assert response.text == "<svg>ok</svg>"
+    assert hotspots_response.status_code == 200
+    assert hotspots_response.json() == {"hotspots": []}
 
 
 def test_artifact_route_rejects_file_outside_runtime(tmp_path: Path) -> None:

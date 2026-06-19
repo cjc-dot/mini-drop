@@ -88,7 +88,7 @@ def create_app(runtime_dir: str | None = None, process_inspector: ProcessInspect
         return store.get_events(job_id)
 
     @app.get("/api/jobs/{job_id}/artifacts/{artifact_name}")
-    def get_job_artifact(job_id: str, artifact_name: Literal["flamegraph", "summary"]) -> FileResponse:
+    def get_job_artifact(job_id: str, artifact_name: Literal["flamegraph", "hotspots", "summary"]) -> FileResponse:
         job = store.get_job(job_id)
         if job is None:
             raise HTTPException(status_code=404, detail="job not found")

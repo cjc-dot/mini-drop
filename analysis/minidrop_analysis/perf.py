@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .folded import collapse_perf_script, format_folded
+from .hotspots import analyze_hotspots
 from .svg import render_flamegraph_svg
 
 
@@ -46,6 +47,7 @@ class PerfCollector:
         perf_script = output_path / "out.perf"
         folded_stack = output_path / "out.folded"
         flamegraph = output_path / "flamegraph.svg"
+        hotspots = output_path / "hotspots.json"
         summary_path = output_path / "summary.json"
 
         self._run(
@@ -72,6 +74,7 @@ class PerfCollector:
         stacks = collapse_perf_script(script_text)
         folded_stack.write_text(format_folded(stacks), encoding="utf-8")
         flamegraph.write_text(render_flamegraph_svg(stacks), encoding="utf-8")
+        hotspots.write_text(json.dumps(analyze_hotspots(stacks), indent=2), encoding="utf-8")
 
         summary = ProfileSummary(
             pid=pid,
@@ -86,6 +89,7 @@ class PerfCollector:
                 "perf_script": str(perf_script),
                 "folded_stack": str(folded_stack),
                 "flamegraph": str(flamegraph),
+                "hotspots": str(hotspots),
                 "summary": str(summary_path),
             },
         )

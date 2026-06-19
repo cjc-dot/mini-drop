@@ -1,6 +1,7 @@
 from collections import Counter
 
 from minidrop_analysis.folded import collapse_perf_script, format_folded
+from minidrop_analysis.hotspots import analyze_hotspots
 from minidrop_analysis.svg import render_flamegraph_svg
 
 
@@ -58,3 +59,25 @@ def test_render_flamegraph_svg_contains_frames() -> None:
     assert 'fill="#eeeecc"' in svg
     assert "hot_func" in svg
     assert "cold_func" in svg
+
+
+def test_analyze_hotspots_reports_self_and_inclusive_samples() -> None:
+    result = analyze_hotspots(Counter({"main;hot_func": 3, "main;cold_func": 1}), limit=3)
+
+    assert result["total_samples"] == 4
+    assert result["hotspots"][0] == {
+        "function": "hot_func",
+        "self_samples": 3,
+        "inclusive_samples": 3,
+        "self_percent": 75.0,
+        "inclusive_percent": 75.0,
+    }
+    assert result["hotspots"][1]["function"] == "cold_func"
+    assert result["hotspots"][1]["self_samples"] == 1
+    assert result["hotspots"][2] == {
+        "function": "main",
+        "self_samples": 0,
+        "inclusive_samples": 4,
+        "self_percent": 0.0,
+        "inclusive_percent": 100.0,
+    }
