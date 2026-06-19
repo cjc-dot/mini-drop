@@ -12,7 +12,14 @@ class ServerJobStore:
         self.runtime_dir = Path(runtime_dir).expanduser().resolve()
         self.jobs_dir = self.runtime_dir / "jobs"
 
-    def create_job(self, pid: int, duration_seconds: int, sample_frequency: int, collector: str = "perf") -> dict:
+    def create_job(
+        self,
+        pid: int,
+        duration_seconds: int,
+        sample_frequency: int,
+        collector: str = "perf",
+        target: dict | None = None,
+    ) -> dict:
         job_id = self._new_job_id()
         created_at = self._now()
         job = {
@@ -25,6 +32,7 @@ class ServerJobStore:
                 "duration_seconds": duration_seconds,
                 "sample_frequency": sample_frequency,
                 "collector": collector,
+                "target": target or {},
             },
             "artifacts": {},
             "error_message": None,

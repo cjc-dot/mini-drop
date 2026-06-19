@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .agent_store import AgentRegistry
+from .process import ProcessInspector
 from .store import ServerJobStore
 
 
@@ -26,11 +27,12 @@ class AgentHeartbeatRequest(BaseModel):
     version: str = Field(default="0.1.0", min_length=1)
 
 
-def create_app(runtime_dir: str | None = None) -> FastAPI:
+def create_app(runtime_dir: str | None = None, process_inspector: ProcessInspector | None = None) -> FastAPI:
     resolved_runtime_dir = runtime_dir or os.environ.get("MINIDROP_RUNTIME", "~/mini-drop-runtime")
     runtime_root = Path(resolved_runtime_dir).expanduser().resolve()
     store = ServerJobStore(resolved_runtime_dir)
     agents = AgentRegistry(resolved_runtime_dir)
+    inspector = process_inspector or ProcessInspector()
     app = FastAPI(title="Mini-Drop API Server")
     frontend_dir = Path(__file__).resolve().parents[2] / "web_frontend"
 
@@ -51,11 +53,21 @@ def create_app(runtime_dir: str | None = None) -> FastAPI:
 
     @app.post("/api/jobs", status_code=201)
     def create_job(request: CreateJobRequest) -> dict:
+        target = inspector.inspect(request.pid)
+        if target is None:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "code": "TARGET_PROCESS_NOT_FOUND",
+                    "message": f"target pid {request.pid} does not exist",
+                },
+            )
         return store.create_job(
             pid=request.pid,
             duration_seconds=request.duration_seconds,
             sample_frequency=request.sample_frequency,
             collector=request.collector,
+            target=target,
         )
 
     @app.get("/api/jobs")
