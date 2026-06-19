@@ -14,9 +14,13 @@ class JobSpec:
     duration_seconds: int
     sample_frequency: int
     collector: str = "perf"
+    target: dict | None = None
 
     def to_dict(self) -> dict:
-        return asdict(self)
+        payload = asdict(self)
+        if payload["target"] is None:
+            payload.pop("target")
+        return payload
 
 
 @dataclass(frozen=True)

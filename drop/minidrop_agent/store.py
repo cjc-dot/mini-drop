@@ -10,6 +10,7 @@ from typing import Callable
 from uuid import uuid4
 
 from .job import JobEvent, JobSpec
+from .process import ProcessInspector
 
 try:
     import fcntl
@@ -22,10 +23,16 @@ class InvalidJobTransition(RuntimeError):
 
 
 class JobStore:
-    def __init__(self, runtime_dir: str, pid_exists: Callable[[int], bool] | None = None) -> None:
+    def __init__(
+        self,
+        runtime_dir: str,
+        pid_exists: Callable[[int], bool] | None = None,
+        inspect_process: Callable[[int], dict | None] | None = None,
+    ) -> None:
         self.runtime_dir = Path(runtime_dir).expanduser().resolve()
         self.jobs_dir = self.runtime_dir / "jobs"
         self.pid_exists = pid_exists or self._pid_exists
+        self.inspect_process = inspect_process or ProcessInspector().inspect
 
     def job_dir(self, job_id: str) -> Path:
         return self.jobs_dir / job_id
@@ -51,16 +58,7 @@ class JobStore:
             job = json.loads(job_file.read_text(encoding="utf-8"))
             if job.get("status") != "PENDING":
                 continue
-            spec = job["spec"]
-            specs.append(
-                JobSpec(
-                    job_id=spec["job_id"],
-                    pid=int(spec["pid"]),
-                    duration_seconds=int(spec["duration_seconds"]),
-                    sample_frequency=int(spec["sample_frequency"]),
-                    collector=spec.get("collector", "perf"),
-                )
-            )
+            specs.append(self._spec_from_job(job))
             if limit is not None and len(specs) >= limit:
                 break
         return specs
@@ -216,6 +214,18 @@ class JobStore:
                     expected_status="PENDING",
                 )
                 skip_notice = (job_id, reason, error_message)
+            else:
+                identity_error = self._target_identity_error(spec) if validate_pid else None
+                if identity_error is not None:
+                    reason = "target process changed before claim"
+                    self._transition_job_locked(
+                        job=job,
+                        status="FAILED",
+                        reason=reason,
+                        error_message=identity_error,
+                        expected_status="PENDING",
+                    )
+                    skip_notice = (job_id, reason, identity_error)
             if skip_notice is None:
                 self._transition_job_locked(
                     job=job,
@@ -300,7 +310,32 @@ class JobStore:
             duration_seconds=int(spec["duration_seconds"]),
             sample_frequency=int(spec["sample_frequency"]),
             collector=spec.get("collector", "perf"),
+            target=spec.get("target") or None,
         )
+
+    def _target_identity_error(self, spec: JobSpec) -> str | None:
+        target = spec.target or {}
+        expected_starttime = target.get("starttime")
+        if expected_starttime is None:
+            return None
+
+        current = self.inspect_process(spec.pid)
+        if current is None:
+            return f"pid {spec.pid} disappeared before identity check"
+
+        current_starttime = current.get("starttime")
+        if current_starttime is None:
+            return None
+
+        try:
+            expected = int(expected_starttime)
+            actual = int(current_starttime)
+        except (TypeError, ValueError):
+            return None
+
+        if actual != expected:
+            return f"pid {spec.pid} starttime changed from {expected} to {actual}"
+        return None
 
     @staticmethod
     def _is_pending_expired(job: dict, max_pending_age_seconds: int | None) -> bool:

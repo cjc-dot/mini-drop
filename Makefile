@@ -52,6 +52,8 @@ agent-run:
 agent-run-pending:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m minidrop_agent run-pending \
 		--runtime-dir $(MINIDROP_RUNTIME) \
+		--max-pending-age $(MAX_PENDING_AGE) \
+		$(if $(filter 1 true yes,$(DISABLE_PID_CHECK)),--disable-pid-check,) \
 		$(if $(PENDING_JOB_ID),--job-id $(PENDING_JOB_ID),)
 
 agent-heartbeat:

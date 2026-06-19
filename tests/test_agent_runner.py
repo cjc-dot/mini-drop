@@ -128,7 +128,10 @@ def test_claim_pending_spec_marks_missing_pid_failed_and_skips_to_next_pending_j
     store.init_job(live_pid)
     skipped = []
 
-    claimed = store.claim_pending_spec(validate_pid=True, on_skip=lambda job_id, reason, error: skipped.append((job_id, reason, error)))
+    claimed = store.claim_pending_spec(
+        validate_pid=True,
+        on_skip=lambda job_id, reason, error: skipped.append((job_id, reason, error)),
+    )
 
     assert claimed is not None
     assert claimed.job_id == "job-002"
@@ -139,6 +142,62 @@ def test_claim_pending_spec_marks_missing_pid_failed_and_skips_to_next_pending_j
     assert missing_job["error_message"] == "pid 1111 does not exist"
     live_job = store.read_job("job-002")
     assert live_job["status"] == "RUNNING"
+
+
+def test_claim_pending_spec_marks_pid_reuse_failed_and_skips_to_next_pending_job(tmp_path: Path) -> None:
+    def inspect_process(pid: int) -> dict | None:
+        return {
+            1111: {"pid": 1111, "starttime": 20},
+            2222: {"pid": 2222, "starttime": 30},
+        }.get(pid)
+
+    store = JobStore(str(tmp_path), pid_exists=lambda pid: True, inspect_process=inspect_process)
+    reused_pid = JobSpec(
+        job_id="job-001",
+        pid=1111,
+        duration_seconds=10,
+        sample_frequency=99,
+        target={"pid": 1111, "starttime": 10},
+    )
+    live_pid = JobSpec(
+        job_id="job-002",
+        pid=2222,
+        duration_seconds=10,
+        sample_frequency=99,
+        target={"pid": 2222, "starttime": 30},
+    )
+    store.init_job(reused_pid)
+    store.init_job(live_pid)
+    skipped = []
+
+    claimed = store.claim_pending_spec(
+        validate_pid=True,
+        on_skip=lambda job_id, reason, error: skipped.append((job_id, reason, error)),
+    )
+
+    assert claimed is not None
+    assert claimed.job_id == "job-002"
+    assert skipped == [
+        ("job-001", "target process changed before claim", "pid 1111 starttime changed from 10 to 20")
+    ]
+    reused_job = store.read_job("job-001")
+    assert reused_job["status"] == "FAILED"
+    assert reused_job["reason"] == "target process changed before claim"
+    assert reused_job["error_message"] == "pid 1111 starttime changed from 10 to 20"
+    live_job = store.read_job("job-002")
+    assert live_job["status"] == "RUNNING"
+
+
+def test_claim_pending_spec_allows_old_jobs_without_target_identity(tmp_path: Path) -> None:
+    store = JobStore(str(tmp_path), pid_exists=lambda pid: True, inspect_process=lambda pid: {"pid": pid, "starttime": 20})
+    old_job = JobSpec(job_id="job-001", pid=1111, duration_seconds=10, sample_frequency=99)
+    store.init_job(old_job)
+
+    claimed = store.claim_pending_spec(validate_pid=True)
+
+    assert claimed is not None
+    assert claimed.job_id == "job-001"
+    assert store.read_job("job-001")["status"] == "RUNNING"
 
 
 def test_claim_pending_spec_marks_stale_pending_job_failed_and_skips_to_next_pending_job(tmp_path: Path) -> None:

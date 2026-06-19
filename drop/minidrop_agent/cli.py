@@ -23,6 +23,10 @@ def _non_negative_int(value: str) -> int:
     return number
 
 
+def _print_skip(job_id: str, reason: str, error: str | None) -> None:
+    print(f"Skipped {job_id}: {reason}" + (f" ({error})" if error else ""), flush=True)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="minidrop_agent")
     subcommands = parser.add_subparsers(dest="command", required=True)
@@ -38,6 +42,8 @@ def build_parser() -> argparse.ArgumentParser:
     run_pending = subcommands.add_parser("run-pending", help="run one pending job from the runtime job store")
     run_pending.add_argument("--runtime-dir", default="~/mini-drop-runtime")
     run_pending.add_argument("--job-id", default=None)
+    run_pending.add_argument("--max-pending-age", default=300, type=_non_negative_int)
+    run_pending.add_argument("--disable-pid-check", action="store_true")
 
     heartbeat = subcommands.add_parser("heartbeat", help="send heartbeat messages to the API server")
     heartbeat.add_argument("--server-url", default="http://127.0.0.1:8000")
@@ -77,7 +83,12 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if result.status == "DONE" else 1
 
     if args.command == "run-pending":
-        result = LocalAgent(runtime_dir=args.runtime_dir).run_pending_once(job_id=args.job_id)
+        result = LocalAgent(runtime_dir=args.runtime_dir).run_pending_once(
+            job_id=args.job_id,
+            validate_pid=not args.disable_pid_check,
+            max_pending_age_seconds=args.max_pending_age or None,
+            on_skip=_print_skip,
+        )
         if result is None:
             print("No pending job found")
             return 0
@@ -111,10 +122,7 @@ def main(argv: list[str] | None = None) -> int:
             validate_pid=not args.disable_pid_check,
             version=args.version,
             on_job_result=lambda result: print(f"Job {result.job_id} finished with status {result.status}", flush=True),
-            on_job_skip=lambda job_id, reason, error: print(
-                f"Skipped {job_id}: {reason}" + (f" ({error})" if error else ""),
-                flush=True,
-            ),
+            on_job_skip=_print_skip,
         )
         try:
             completed_jobs = daemon.run_forever(max_jobs=args.max_jobs or None)
