@@ -21,6 +21,7 @@ const ebpfSummary = document.querySelector("#ebpfSummary");
 const ebpfBody = document.querySelector("#ebpfBody");
 const ebpfLatencySummary = document.querySelector("#ebpfLatencySummary");
 const ebpfLatencyBody = document.querySelector("#ebpfLatencyBody");
+const ebpfLatencyChart = document.querySelector("#ebpfLatencyChart");
 let selectedJobId = null;
 
 async function fetchJson(url, options) {
@@ -209,10 +210,12 @@ function renderEbpfLatency(report) {
     ? `${report.total_events || 0} event(s) · ${report.duration_seconds || "-"}s`
     : "not available";
   if (events.length === 0) {
+    ebpfLatencyChart.innerHTML = `<p class="empty">No eBPF IO latency data</p>`;
     ebpfLatencyBody.innerHTML = `<tr><td colspan="4" class="empty">No eBPF IO latency data</td></tr>`;
     return;
   }
 
+  ebpfLatencyChart.innerHTML = renderLatencyChart(events);
   const rows = [];
   for (const event of events) {
     const histogram = Array.isArray(event.histogram) ? event.histogram : [];
@@ -230,6 +233,47 @@ function renderEbpfLatency(report) {
   ebpfLatencyBody.innerHTML = rows.join("");
 }
 
+function renderLatencyChart(events) {
+  const maxCount = Math.max(
+    1,
+    ...events.flatMap((event) => {
+      const histogram = Array.isArray(event.histogram) ? event.histogram : [];
+      return histogram.map((bucket) => Number(bucket.count || 0));
+    }),
+  );
+
+  return events.map((event) => {
+    const histogram = Array.isArray(event.histogram) ? event.histogram : [];
+    const eventName = String(event.event || "unknown").toLowerCase();
+    return `
+      <div class="latency-group">
+        <div class="latency-group-title">
+          <strong>${escapeHtml(event.event || "-")}</strong>
+          <span>p50 ${escapeHtml(event.p50_bucket || "-")} · p99 ${escapeHtml(event.p99_bucket || "-")}</span>
+        </div>
+        <div class="latency-bars">
+          ${histogram.map((bucket) => renderLatencyBar(bucket, maxCount, eventName)).join("")}
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+function renderLatencyBar(bucket, maxCount, eventName) {
+  const count = Number(bucket.count || 0);
+  const width = Math.max(0, Math.min(100, (count / maxCount) * 100));
+  const widthText = width.toFixed(2);
+  return `
+    <div class="latency-row">
+      <span class="latency-label">${escapeHtml(bucket.bucket || "-")}</span>
+      <div class="latency-track" aria-label="${escapeHtml(bucket.bucket || "-")} ${escapeHtml(count)} samples">
+        <span class="latency-fill ${escapeHtml(eventName)}" style="width: ${widthText}%"></span>
+      </div>
+      <span class="latency-value">${escapeHtml(bucket.percent ?? 0)}%</span>
+    </div>
+  `;
+}
+
 async function loadJobReport(jobId, options = {}) {
   selectedJobId = jobId;
   document.querySelectorAll("#jobsBody tr").forEach((row) => row.classList.remove("selected-row"));
@@ -244,6 +288,7 @@ async function loadJobReport(jobId, options = {}) {
   flamegraphOpenLink.classList.add("hidden");
   hotspotsBody.innerHTML = `<tr><td colspan="5" class="empty">Loading...</td></tr>`;
   ebpfBody.innerHTML = `<tr><td colspan="3" class="empty">Loading...</td></tr>`;
+  ebpfLatencyChart.innerHTML = `<p class="empty">Loading...</p>`;
   ebpfLatencyBody.innerHTML = `<tr><td colspan="4" class="empty">Loading...</td></tr>`;
   suggestionsBody.innerHTML = `<p class="empty">Loading...</p>`;
 

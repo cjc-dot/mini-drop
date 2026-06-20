@@ -38,6 +38,7 @@ def test_web_frontend_contains_job_report_panel() -> None:
     assert 'id="hotspotsBody"' in index
     assert 'id="suggestionsBody"' in index
     assert 'id="ebpfBody"' in index
+    assert 'id="ebpfLatencyChart"' in index
     assert 'id="ebpfLatencyBody"' in index
     assert 'id="collectorInput"' in index
     assert "Rate/s" in index
@@ -47,6 +48,18 @@ def test_web_frontend_contains_job_report_panel() -> None:
     assert "loadJobReport" in app_js
     assert "formatFindingEvidence" in app_js
     assert "renderEbpfLatency" in app_js
+    assert "renderLatencyChart" in app_js
+    assert "renderLatencyBar" in app_js
+
+
+def test_web_frontend_contains_latency_chart_styles() -> None:
+    root = Path(__file__).resolve().parents[1]
+    styles = (root / "web_frontend" / "styles.css").read_text(encoding="utf-8")
+
+    assert ".latency-chart" in styles
+    assert ".latency-row" in styles
+    assert ".latency-track" in styles
+    assert ".latency-fill" in styles
 
 
 def test_web_ui_route_serves_index(tmp_path: Path) -> None:

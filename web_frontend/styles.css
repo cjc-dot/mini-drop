@@ -337,6 +337,90 @@ a {
   padding: 9px 10px;
 }
 
+.latency-chart {
+  display: grid;
+  gap: 18px;
+  margin-bottom: 14px;
+}
+
+.latency-group {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid #e6ebf3;
+  border-radius: 6px;
+  background: #fbfdff;
+}
+
+.latency-group-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.latency-group-title strong {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  border-radius: 999px;
+  padding: 0 9px;
+  background: #edf2ff;
+  color: #1c4ed8;
+  font-family: Consolas, Monaco, monospace;
+  font-size: 13px;
+}
+
+.latency-group-title span {
+  color: var(--muted);
+  font-size: 12px;
+  text-align: right;
+}
+
+.latency-bars {
+  display: grid;
+  gap: 7px;
+}
+
+.latency-row {
+  display: grid;
+  grid-template-columns: 92px minmax(160px, 1fr) 120px;
+  align-items: center;
+  gap: 10px;
+  min-height: 24px;
+}
+
+.latency-label,
+.latency-value {
+  font-family: Consolas, Monaco, monospace;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.latency-value {
+  color: var(--muted);
+  text-align: right;
+}
+
+.latency-track {
+  height: 12px;
+  border-radius: 999px;
+  background: #edf2f7;
+  overflow: hidden;
+}
+
+.latency-fill {
+  display: block;
+  height: 100%;
+  min-width: 2px;
+  border-radius: inherit;
+  background: var(--blue);
+}
+
+.latency-fill.write {
+  background: var(--green);
+}
+
 .suggestions {
   display: grid;
   gap: 12px;
@@ -402,5 +486,23 @@ a {
 
   .meta-grid {
     grid-template-columns: 1fr;
+  }
+
+  .latency-group-title {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .latency-group-title span {
+    text-align: left;
+  }
+
+  .latency-row {
+    grid-template-columns: 76px minmax(100px, 1fr);
+  }
+
+  .latency-value {
+    grid-column: 2;
+    text-align: left;
   }
 }
