@@ -1,5 +1,6 @@
 from collections import Counter
 
+from minidrop_analysis.advisor import format_advice_markdown, generate_advice
 from minidrop_analysis.folded import collapse_perf_script, format_folded
 from minidrop_analysis.hotspots import analyze_hotspots
 from minidrop_analysis.svg import render_flamegraph_svg
@@ -81,3 +82,41 @@ def test_analyze_hotspots_reports_self_and_inclusive_samples() -> None:
         "self_percent": 0.0,
         "inclusive_percent": 100.0,
     }
+
+
+def test_generate_advice_reports_high_self_hotspot() -> None:
+    hotspots = analyze_hotspots(Counter({"main;hot_func": 3, "main;cold_func": 1}), limit=3)
+
+    advice = generate_advice(hotspots)
+
+    assert advice["source"] == "hotspots"
+    assert advice["finding_count"] == 1
+    assert advice["findings"][0]["rule_id"] == "cpu_self_hotspot"
+    assert advice["findings"][0]["function"] == "hot_func"
+    assert advice["findings"][0]["evidence"]["self_percent"] == 75.0
+
+
+def test_format_advice_markdown_contains_evidence() -> None:
+    advice = {
+        "total_samples": 4,
+        "findings": [
+            {
+                "title": "CPU self hotspot",
+                "severity": "HIGH",
+                "function": "hot_func",
+                "evidence": {
+                    "self_samples": 3,
+                    "inclusive_samples": 3,
+                    "self_percent": 75.0,
+                    "inclusive_percent": 75.0,
+                },
+                "advice": "check hot loop",
+            }
+        ],
+    }
+
+    markdown = format_advice_markdown(advice)
+
+    assert "CPU self hotspot" in markdown
+    assert "`hot_func`" in markdown
+    assert "75.0%" in markdown

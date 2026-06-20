@@ -71,6 +71,9 @@ function renderJobs(jobs) {
     if (job.artifacts && job.artifacts.hotspots) {
       artifactLinks.push(`<a href="/api/jobs/${encodeURIComponent(job.job_id)}/artifacts/hotspots" target="_blank">hotspots</a>`);
     }
+    if (job.artifacts && job.artifacts.suggestions) {
+      artifactLinks.push(`<a href="/api/jobs/${encodeURIComponent(job.job_id)}/artifacts/suggestions" target="_blank">suggestions</a>`);
+    }
     if (job.artifacts && job.artifacts.summary) {
       artifactLinks.push(`<a href="/api/jobs/${encodeURIComponent(job.job_id)}/artifacts/summary" target="_blank">summary</a>`);
     }

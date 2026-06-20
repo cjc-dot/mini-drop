@@ -45,6 +45,8 @@ def test_artifact_route_serves_known_artifacts_inside_runtime(tmp_path: Path) ->
     flamegraph.write_text("<svg>ok</svg>", encoding="utf-8")
     hotspots = profile_dir / "hotspots.json"
     hotspots.write_text('{"hotspots":[]}', encoding="utf-8")
+    suggestions = profile_dir / "suggestions.json"
+    suggestions.write_text('{"findings":[]}', encoding="utf-8")
     job = {
         "job_id": "job-1",
         "status": "DONE",
@@ -55,7 +57,11 @@ def test_artifact_route_serves_known_artifacts_inside_runtime(tmp_path: Path) ->
             "sample_frequency": 99,
             "collector": "perf",
         },
-        "artifacts": {"flamegraph": str(flamegraph), "hotspots": str(hotspots)},
+        "artifacts": {
+            "flamegraph": str(flamegraph),
+            "hotspots": str(hotspots),
+            "suggestions": str(suggestions),
+        },
         "reason": "job completed successfully",
         "error_message": None,
         "created_at": "2026-06-16T00:00:00+00:00",
@@ -66,11 +72,14 @@ def test_artifact_route_serves_known_artifacts_inside_runtime(tmp_path: Path) ->
 
     response = client.get("/api/jobs/job-1/artifacts/flamegraph")
     hotspots_response = client.get("/api/jobs/job-1/artifacts/hotspots")
+    suggestions_response = client.get("/api/jobs/job-1/artifacts/suggestions")
 
     assert response.status_code == 200
     assert response.text == "<svg>ok</svg>"
     assert hotspots_response.status_code == 200
     assert hotspots_response.json() == {"hotspots": []}
+    assert suggestions_response.status_code == 200
+    assert suggestions_response.json() == {"findings": []}
 
 
 def test_artifact_route_rejects_file_outside_runtime(tmp_path: Path) -> None:

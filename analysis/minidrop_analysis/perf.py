@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .advisor import format_advice_markdown, generate_advice
 from .folded import collapse_perf_script, format_folded
 from .hotspots import analyze_hotspots
 from .svg import render_flamegraph_svg
@@ -48,6 +49,8 @@ class PerfCollector:
         folded_stack = output_path / "out.folded"
         flamegraph = output_path / "flamegraph.svg"
         hotspots = output_path / "hotspots.json"
+        suggestions = output_path / "suggestions.json"
+        suggestions_markdown = output_path / "suggestions.md"
         summary_path = output_path / "summary.json"
 
         self._run(
@@ -74,7 +77,11 @@ class PerfCollector:
         stacks = collapse_perf_script(script_text)
         folded_stack.write_text(format_folded(stacks), encoding="utf-8")
         flamegraph.write_text(render_flamegraph_svg(stacks), encoding="utf-8")
-        hotspots.write_text(json.dumps(analyze_hotspots(stacks), indent=2), encoding="utf-8")
+        hotspot_report = analyze_hotspots(stacks)
+        advice_report = generate_advice(hotspot_report)
+        hotspots.write_text(json.dumps(hotspot_report, indent=2), encoding="utf-8")
+        suggestions.write_text(json.dumps(advice_report, indent=2), encoding="utf-8")
+        suggestions_markdown.write_text(format_advice_markdown(advice_report), encoding="utf-8")
 
         summary = ProfileSummary(
             pid=pid,
@@ -90,6 +97,8 @@ class PerfCollector:
                 "folded_stack": str(folded_stack),
                 "flamegraph": str(flamegraph),
                 "hotspots": str(hotspots),
+                "suggestions": str(suggestions),
+                "suggestions_markdown": str(suggestions_markdown),
                 "summary": str(summary_path),
             },
         )
