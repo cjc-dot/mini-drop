@@ -52,6 +52,10 @@ class UploadArtifactsRequest(BaseModel):
     artifacts: dict[str, str] = Field(default_factory=dict)
 
 
+class RequeueExpiredLeasesRequest(BaseModel):
+    max_claim_attempts: int = Field(default=3, gt=0)
+
+
 def create_app(runtime_dir: str | None = None, process_inspector: ProcessInspector | None = None) -> FastAPI:
     resolved_runtime_dir = runtime_dir or os.environ.get("MINIDROP_RUNTIME", "~/mini-drop-runtime")
     runtime_root = Path(resolved_runtime_dir).expanduser().resolve()
@@ -198,6 +202,11 @@ def create_app(runtime_dir: str | None = None, process_inspector: ProcessInspect
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except RuntimeError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.post("/api/maintenance/requeue-expired-leases")
+    def requeue_expired_leases(request: RequeueExpiredLeasesRequest) -> dict:
+        processed = store.requeue_expired_leases(max_claim_attempts=request.max_claim_attempts)
+        return {"processed_count": len(processed), "processed": processed}
 
     @app.get("/api/agents")
     def list_agents(offline_after_seconds: int = 30) -> list[dict]:

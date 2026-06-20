@@ -106,6 +106,20 @@ class FakeClient:
         }
 
 
+class FinishRejectingClient(FakeClient):
+    def finish(
+        self,
+        agent_id: str,
+        job_id: str,
+        status: str,
+        lease_token: str | None = None,
+        artifacts: dict[str, str] | None = None,
+        error_message: str | None = None,
+        reason: str | None = None,
+    ) -> dict:
+        raise RuntimeError("server unavailable")
+
+
 class FakeProcessInspector:
     def __init__(self, target: dict | None) -> None:
         self.target = target
@@ -209,6 +223,25 @@ def test_http_job_runner_reports_failed_when_collector_raises(tmp_path: Path) ->
     assert client.finished[0]["status"] == "FAILED"
     assert client.finished[0]["lease_token"] == "lease-1"
     assert client.finished[0]["reason"] == "collector failed"
+
+
+def test_http_job_runner_returns_failed_when_failure_report_is_rejected(tmp_path: Path) -> None:
+    client = FinishRejectingClient({"job": _claimed_job(), "skipped": []})
+    runner = HttpJobRunner(
+        runtime_dir=str(tmp_path),
+        agent_id="agent-1",
+        client=client,
+        collector=FailingCollector(),
+        process_inspector=FakeProcessInspector({"pid": 1234, "starttime": 42}),
+    )
+
+    result = runner.run_pending_once(validate_pid=True)
+
+    assert result is not None
+    assert result.status == "FAILED"
+    assert "collector boom" in result.error_message
+    assert "failed to report failure to server" in result.error_message
+    assert "server unavailable" in result.error_message
 
 
 def test_server_job_client_skips_raw_perf_data_when_encoding_uploads(tmp_path: Path) -> None:

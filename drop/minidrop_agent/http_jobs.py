@@ -308,21 +308,27 @@ class HttpJobRunner:
         reason: str,
         error_message: str,
     ) -> JobResult:
-        finished = self.client.finish(
-            agent_id=self.agent_id,
-            job_id=spec.job_id,
-            status="FAILED",
-            lease_token=lease_token,
-            reason=reason,
-            error_message=error_message,
-        )
+        try:
+            finished = self.client.finish(
+                agent_id=self.agent_id,
+                job_id=spec.job_id,
+                status="FAILED",
+                lease_token=lease_token,
+                reason=reason,
+                error_message=error_message,
+            )
+            status = finished.get("status", "FAILED")
+            result_error = error_message
+        except Exception as exc:
+            status = "FAILED"
+            result_error = f"{error_message}; failed to report failure to server: {exc}"
         return JobResult(
             job_id=spec.job_id,
-            status=finished.get("status", "FAILED"),
+            status=status,
             job_file=str(job_file),
             output_dir=str(output_dir),
             artifacts={},
-            error_message=error_message,
+            error_message=result_error,
         )
 
 

@@ -210,6 +210,32 @@ class ServerJobStore:
                 if not lease_expires_at or not self._is_time_expired(lease_expires_at):
                     continue
 
+                if job.get("status") == "UPLOADING":
+                    reason = "job lease expired during artifact upload"
+                    error_message = f"lease expired at {lease_expires_at}"
+                    failed = self._transition_job_locked(
+                        job=job,
+                        status="FAILED",
+                        reason=reason,
+                        artifacts={},
+                        error_message=error_message,
+                        expected_status="UPLOADING",
+                        extra={
+                            "lease_token": None,
+                            "lease_expires_at": None,
+                            "previous_claimed_by": job.get("claimed_by"),
+                        },
+                    )
+                    skipped.append(
+                        {
+                            "job_id": job_id,
+                            "reason": reason,
+                            "error_message": error_message,
+                            "status": failed["status"],
+                        }
+                    )
+                    continue
+
                 if self._has_exhausted_claim_attempts(job, max_claim_attempts):
                     reason = "job claim attempts exhausted after lease expiration"
                     error_message = self._claim_attempts_exhausted_message(job, max_claim_attempts)

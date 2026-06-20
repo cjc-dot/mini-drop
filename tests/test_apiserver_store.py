@@ -118,6 +118,28 @@ def test_finish_claimed_job_records_uploading_and_done_events(tmp_path: Path) ->
     ]
 
 
+def test_finish_claimed_job_failure_clears_lease_fields(tmp_path: Path) -> None:
+    store = ServerJobStore(str(tmp_path))
+    pending = store.create_job(pid=1234, duration_seconds=10, sample_frequency=99)
+    claimed = store.claim_pending_job(agent_id="agent-1")["job"]
+
+    failed = store.finish_claimed_job(
+        agent_id="agent-1",
+        job_id=pending["job_id"],
+        status="FAILED",
+        lease_token=claimed["lease_token"],
+        reason="collector failed",
+        error_message="perf failed",
+    )
+
+    assert failed["status"] == "FAILED"
+    assert failed["reason"] == "collector failed"
+    assert failed["error_message"] == "perf failed"
+    assert failed["lease_token"] is None
+    assert failed["lease_expires_at"] is None
+    assert [event["status"] for event in store.get_events(pending["job_id"])] == ["PENDING", "RUNNING", "FAILED"]
+
+
 def test_finish_claimed_job_rejects_other_agent(tmp_path: Path) -> None:
     store = ServerJobStore(str(tmp_path))
     pending = store.create_job(pid=1234, duration_seconds=10, sample_frequency=99)
@@ -236,6 +258,43 @@ def test_requeue_expired_leases_moves_running_job_back_to_pending(tmp_path: Path
     assert job["lease_expires_at"] is None
     assert job["previous_claimed_by"] == "agent-1"
     assert [event["status"] for event in store.get_events(pending["job_id"])] == ["PENDING", "RUNNING", "PENDING"]
+
+
+def test_requeue_expired_leases_fails_uploading_job_instead_of_requeueing(tmp_path: Path) -> None:
+    store = ServerJobStore(str(tmp_path))
+    pending = store.create_job(pid=1234, duration_seconds=10, sample_frequency=99)
+    claimed = store.claim_pending_job(agent_id="agent-1", lease_seconds=60)["job"]
+    uploaded = store.upload_artifacts(
+        agent_id="agent-1",
+        job_id=pending["job_id"],
+        lease_token=claimed["lease_token"],
+        artifact_payloads={"flamegraph": base64.b64encode(b"<svg>partial</svg>").decode("ascii")},
+    )
+    uploaded["lease_expires_at"] = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
+    store._write_json_atomic(tmp_path / "jobs" / pending["job_id"] / "job.json", uploaded)
+
+    skipped = store.requeue_expired_leases(max_claim_attempts=3)
+
+    assert skipped == [
+        {
+            "job_id": pending["job_id"],
+            "reason": "job lease expired during artifact upload",
+            "error_message": f"lease expired at {uploaded['lease_expires_at']}",
+            "status": "FAILED",
+        }
+    ]
+    job = store.get_job(pending["job_id"])
+    assert job["status"] == "FAILED"
+    assert job["artifacts"] == {}
+    assert job["previous_claimed_by"] == "agent-1"
+    assert job["lease_token"] is None
+    assert job["lease_expires_at"] is None
+    assert [event["status"] for event in store.get_events(pending["job_id"])] == [
+        "PENDING",
+        "RUNNING",
+        "UPLOADING",
+        "FAILED",
+    ]
 
 
 def test_requeue_expired_lease_fails_job_after_claim_attempt_limit(tmp_path: Path) -> None:

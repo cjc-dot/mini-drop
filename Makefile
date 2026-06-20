@@ -21,7 +21,7 @@ DISABLE_PID_CHECK ?= 0
 JOB_SOURCE ?= server
 LEASE_SECONDS ?= 60
 
-.PHONY: init build-workload collect agent-run agent-run-pending agent-heartbeat agent-daemon api-run test clean-runtime demo agent-demo
+.PHONY: init build-workload collect agent-run agent-run-pending agent-heartbeat agent-daemon api-run api-maintenance test clean-runtime demo agent-demo
 
 init:
 	mkdir -p $(MINIDROP_RUNTIME)/builds
@@ -85,6 +85,11 @@ api-run: init
 		--host $(API_HOST) \
 		--port $(API_PORT) \
 		--runtime-dir $(MINIDROP_RUNTIME)
+
+api-maintenance:
+	curl -s -X POST http://$(API_HOST):$(API_PORT)/api/maintenance/requeue-expired-leases \
+		-H "Content-Type: application/json" \
+		-d '{"max_claim_attempts": $(MAX_CLAIM_ATTEMPTS)}'
 
 demo: build-workload
 	@set -euo pipefail; \

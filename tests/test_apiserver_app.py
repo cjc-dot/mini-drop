@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import base64
+from datetime import datetime, timedelta, timezone
+import json
+from pathlib import Path
 
 from fastapi.testclient import TestClient
 
@@ -160,3 +163,31 @@ def test_agent_renews_claimed_job_lease_over_http(tmp_path) -> None:
     assert response.status_code == 200
     assert response.json()["status"] == "RUNNING"
     assert response.json()["lease_expires_at"] > claimed["lease_expires_at"]
+
+
+def test_maintenance_endpoint_requeues_expired_running_jobs(tmp_path) -> None:
+    client = TestClient(create_app(str(tmp_path), process_inspector=FakeProcessInspector({1234: {"pid": 1234}})))
+    created = client.post(
+        "/api/jobs",
+        json={"pid": 1234, "duration_seconds": 10, "sample_frequency": 99},
+    ).json()
+    claimed = client.post(
+        "/api/agents/crash-agent/jobs/claim",
+        json={"max_pending_age_seconds": 300, "lease_seconds": 60, "max_claim_attempts": 3},
+    ).json()["job"]
+    claimed["lease_expires_at"] = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
+    job_file = Path(tmp_path) / "jobs" / created["job_id"] / "job.json"
+    job_file.write_text(json.dumps(claimed), encoding="utf-8")
+
+    response = client.post(
+        "/api/maintenance/requeue-expired-leases",
+        json={"max_claim_attempts": 3},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["processed_count"] == 1
+    assert payload["processed"][0]["reason"] == "job lease expired before completion"
+    job = client.get(f"/api/jobs/{created['job_id']}").json()
+    assert job["status"] == "PENDING"
+    assert job["previous_claimed_by"] == "crash-agent"
