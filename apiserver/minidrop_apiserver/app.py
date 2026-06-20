@@ -18,7 +18,7 @@ class CreateJobRequest(BaseModel):
     pid: int = Field(gt=0)
     duration_seconds: int = Field(default=10, gt=0)
     sample_frequency: int = Field(default=99, gt=0)
-    collector: Literal["perf", "ebpf_syscall"] = "perf"
+    collector: Literal["perf", "ebpf_syscall", "ebpf_io_latency"] = "perf"
 
 
 class AgentHeartbeatRequest(BaseModel):
@@ -126,6 +126,8 @@ def create_app(runtime_dir: str | None = None, process_inspector: ProcessInspect
             "suggestions_markdown",
             "ebpf_raw",
             "ebpf_syscalls",
+            "ebpf_io_latency_raw",
+            "ebpf_io_latency",
             "summary",
         ],
     ) -> FileResponse:

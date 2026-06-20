@@ -19,6 +19,8 @@ const suggestionSummary = document.querySelector("#suggestionSummary");
 const suggestionsBody = document.querySelector("#suggestionsBody");
 const ebpfSummary = document.querySelector("#ebpfSummary");
 const ebpfBody = document.querySelector("#ebpfBody");
+const ebpfLatencySummary = document.querySelector("#ebpfLatencySummary");
+const ebpfLatencyBody = document.querySelector("#ebpfLatencyBody");
 let selectedJobId = null;
 
 async function fetchJson(url, options) {
@@ -84,6 +86,7 @@ function renderJobs(jobs) {
       || job.artifacts.suggestions
       || job.artifacts.flamegraph
       || job.artifacts.ebpf_syscalls
+      || job.artifacts.ebpf_io_latency
     );
     const result = hasReport ? "analysis ready" : (job.reason || "-");
     const selectedClass = job.job_id === selectedJobId ? "selected-row" : "";
@@ -175,6 +178,9 @@ function formatFindingEvidence(evidence) {
   if (evidence.rate_per_second !== undefined) parts.push(`rate ${evidence.rate_per_second}/s`);
   if (evidence.read_per_second !== undefined) parts.push(`read ${evidence.read_per_second}/s`);
   if (evidence.write_per_second !== undefined) parts.push(`write ${evidence.write_per_second}/s`);
+  if (evidence.p50_bucket !== undefined) parts.push(`p50 ${evidence.p50_bucket}`);
+  if (evidence.p99_bucket !== undefined) parts.push(`p99 ${evidence.p99_bucket}`);
+  if (evidence.tail_1ms_percent !== undefined) parts.push(`tail >=1ms ${evidence.tail_1ms_percent}%`);
   return parts.join(", ");
 }
 
@@ -197,6 +203,33 @@ function renderEbpfSyscalls(report) {
   `).join("");
 }
 
+function renderEbpfLatency(report) {
+  const events = report && Array.isArray(report.events) ? report.events : [];
+  ebpfLatencySummary.textContent = report
+    ? `${report.total_events || 0} event(s) · ${report.duration_seconds || "-"}s`
+    : "not available";
+  if (events.length === 0) {
+    ebpfLatencyBody.innerHTML = `<tr><td colspan="4" class="empty">No eBPF IO latency data</td></tr>`;
+    return;
+  }
+
+  const rows = [];
+  for (const event of events) {
+    const histogram = Array.isArray(event.histogram) ? event.histogram : [];
+    for (const bucket of histogram) {
+      rows.push(`
+        <tr>
+          <td class="mono">${escapeHtml(event.event || "-")}</td>
+          <td>${escapeHtml(bucket.bucket || "-")}</td>
+          <td>${escapeHtml(bucket.count ?? 0)}</td>
+          <td>${escapeHtml(bucket.percent ?? 0)}%</td>
+        </tr>
+      `);
+    }
+  }
+  ebpfLatencyBody.innerHTML = rows.join("");
+}
+
 async function loadJobReport(jobId, options = {}) {
   selectedJobId = jobId;
   document.querySelectorAll("#jobsBody tr").forEach((row) => row.classList.remove("selected-row"));
@@ -211,15 +244,17 @@ async function loadJobReport(jobId, options = {}) {
   flamegraphOpenLink.classList.add("hidden");
   hotspotsBody.innerHTML = `<tr><td colspan="5" class="empty">Loading...</td></tr>`;
   ebpfBody.innerHTML = `<tr><td colspan="3" class="empty">Loading...</td></tr>`;
+  ebpfLatencyBody.innerHTML = `<tr><td colspan="4" class="empty">Loading...</td></tr>`;
   suggestionsBody.innerHTML = `<p class="empty">Loading...</p>`;
 
   try {
     const job = await fetchJson(`/api/jobs/${encodeURIComponent(jobId)}`);
     const artifacts = job.artifacts || {};
-    const [hotspots, suggestions, ebpfSyscalls] = await Promise.all([
+    const [hotspots, suggestions, ebpfSyscalls, ebpfLatency] = await Promise.all([
       artifacts.hotspots ? fetchJson(`/api/jobs/${encodeURIComponent(jobId)}/artifacts/hotspots`) : Promise.resolve(null),
       artifacts.suggestions ? fetchJson(`/api/jobs/${encodeURIComponent(jobId)}/artifacts/suggestions`) : Promise.resolve(null),
       artifacts.ebpf_syscalls ? fetchJson(`/api/jobs/${encodeURIComponent(jobId)}/artifacts/ebpf_syscalls`) : Promise.resolve(null),
+      artifacts.ebpf_io_latency ? fetchJson(`/api/jobs/${encodeURIComponent(jobId)}/artifacts/ebpf_io_latency`) : Promise.resolve(null),
     ]);
 
     renderReportMeta(job);
@@ -232,6 +267,7 @@ async function loadJobReport(jobId, options = {}) {
     }
     renderHotspots(hotspots);
     renderEbpfSyscalls(ebpfSyscalls);
+    renderEbpfLatency(ebpfLatency);
     renderSuggestions(suggestions);
     jobReportStatus.textContent = job.status === "DONE" ? "Analysis ready" : "Artifacts may be incomplete";
     if (options.scroll && window.matchMedia("(max-width: 1180px)").matches) {
@@ -257,6 +293,7 @@ async function refreshDashboard() {
         || job.artifacts.suggestions
         || job.artifacts.flamegraph
         || job.artifacts.ebpf_syscalls
+        || job.artifacts.ebpf_io_latency
       ));
       if (latestReportJob) {
         loadJobReport(latestReportJob.job_id);

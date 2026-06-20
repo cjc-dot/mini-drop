@@ -69,6 +69,23 @@ def test_create_job_accepts_ebpf_syscall_collector(tmp_path) -> None:
     assert response.json()["spec"]["collector"] == "ebpf_syscall"
 
 
+def test_create_job_accepts_ebpf_io_latency_collector(tmp_path) -> None:
+    client = TestClient(create_app(str(tmp_path), process_inspector=FakeProcessInspector({1234: {"pid": 1234}})))
+
+    response = client.post(
+        "/api/jobs",
+        json={
+            "pid": 1234,
+            "duration_seconds": 10,
+            "sample_frequency": 99,
+            "collector": "ebpf_io_latency",
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json()["spec"]["collector"] == "ebpf_io_latency"
+
+
 def test_agent_claim_and_finish_job_over_http(tmp_path) -> None:
     target = {
         "pid": 1234,

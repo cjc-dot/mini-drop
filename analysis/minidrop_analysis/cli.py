@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 
 from .ebpf import EbpfSyscallCollector
+from .ebpf_latency import EbpfIoLatencyCollector
 from .perf import PerfCollector
 
 
@@ -22,7 +23,7 @@ def build_parser() -> argparse.ArgumentParser:
     collect.add_argument("--duration", default=10, type=_positive_int)
     collect.add_argument("--frequency", default=99, type=_positive_int)
     collect.add_argument("--output", required=True)
-    collect.add_argument("--collector", default="perf", choices=["perf", "ebpf_syscall"])
+    collect.add_argument("--collector", default="perf", choices=["perf", "ebpf_syscall", "ebpf_io_latency"])
     collect.add_argument("--perf-bin", default="perf")
     collect.add_argument("--bpftrace-bin", default="bpftrace")
 
@@ -37,6 +38,8 @@ def main(argv: list[str] | None = None) -> int:
             collector = PerfCollector(perf_bin=args.perf_bin)
         elif args.collector == "ebpf_syscall":
             collector = EbpfSyscallCollector(bpftrace_bin=args.bpftrace_bin)
+        elif args.collector == "ebpf_io_latency":
+            collector = EbpfIoLatencyCollector(bpftrace_bin=args.bpftrace_bin)
         else:
             raise AssertionError(f"unhandled collector: {args.collector}")
         summary = collector.collect(

@@ -39,6 +39,7 @@
             <select id="collectorInput" name="collector">
               <option value="perf">perf CPU flame graph</option>
               <option value="ebpf_syscall">eBPF syscall counter</option>
+              <option value="ebpf_io_latency">eBPF IO latency</option>
             </select>
           </label>
           <button type="submit">Create</button>
@@ -143,6 +144,26 @@
                     </tr>
                   </thead>
                   <tbody id="ebpfBody"></tbody>
+                </table>
+              </div>
+            </section>
+
+            <section class="report-section">
+              <div class="section-title">
+                <h3>eBPF IO Latency</h3>
+                <span id="ebpfLatencySummary" class="muted"></span>
+              </div>
+              <div class="table-wrap">
+                <table class="compact-table">
+                  <thead>
+                    <tr>
+                      <th>Event</th>
+                      <th>Bucket (us)</th>
+                      <th>Count</th>
+                      <th>Percent</th>
+                    </tr>
+                  </thead>
+                  <tbody id="ebpfLatencyBody"></tbody>
                 </table>
               </div>
             </section>

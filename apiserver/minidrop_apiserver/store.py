@@ -34,6 +34,8 @@ ARTIFACT_FILENAMES = {
     "suggestions_markdown": "suggestions.md",
     "ebpf_raw": "ebpf_syscalls.raw",
     "ebpf_syscalls": "ebpf_syscalls.json",
+    "ebpf_io_latency_raw": "ebpf_io_latency.raw",
+    "ebpf_io_latency": "ebpf_io_latency.json",
     "summary": "summary.json",
 }
 

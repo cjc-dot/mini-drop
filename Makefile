@@ -22,7 +22,7 @@ DISABLE_PID_CHECK ?= 0
 JOB_SOURCE ?= server
 LEASE_SECONDS ?= 60
 
-.PHONY: init build-workload build-io-workload collect agent-run agent-run-pending agent-heartbeat agent-daemon api-run api-maintenance test clean-runtime demo agent-demo
+.PHONY: init check-tools setup-sudoers build-workload build-io-workload build-latency-workload collect agent-run agent-run-pending agent-heartbeat agent-daemon api-run api-maintenance test clean-runtime demo agent-demo
 
 init:
 	mkdir -p $(MINIDROP_RUNTIME)/builds
@@ -30,6 +30,14 @@ init:
 	mkdir -p $(MINIDROP_RUNTIME)/logs
 	mkdir -p $(MINIDROP_RUNTIME)/data
 	mkdir -p $(MINIDROP_RUNTIME)/tmp
+
+check-tools:
+	bash deploy/check_tools.sh
+
+setup-sudoers:
+	@echo "This command configures passwordless sudo for perf and bpftrace."
+	@echo "It writes /etc/sudoers.d/mini-drop-tools and requires your sudo password once."
+	sudo bash deploy/setup_sudoers.sh
 
 build-workload: init
 	gcc -O2 -g -fno-omit-frame-pointer \
@@ -40,6 +48,11 @@ build-io-workload: init
 	gcc -O2 -g -fno-omit-frame-pointer \
 		-o $(MINIDROP_RUNTIME)/builds/io_syscall_hotspot \
 		workloads/io_syscall_hotspot.c
+
+build-latency-workload: init
+	gcc -O2 -g -fno-omit-frame-pointer -pthread \
+		-o $(MINIDROP_RUNTIME)/builds/io_latency_hotspot \
+		workloads/io_latency_hotspot.c
 
 collect:
 	@if [ -z "$(PID)" ]; then echo "Usage: make collect PID=<target-pid> [DURATION=10] [FREQUENCY=99] [PROFILE_ID=name]"; exit 2; fi

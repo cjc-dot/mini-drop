@@ -26,6 +26,8 @@ UPLOADABLE_ARTIFACTS = {
     "suggestions_markdown",
     "ebpf_raw",
     "ebpf_syscalls",
+    "ebpf_io_latency_raw",
+    "ebpf_io_latency",
     "summary",
 }
 
