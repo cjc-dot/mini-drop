@@ -275,6 +275,66 @@ def test_compare_ebpf_io_latency_returns_no_baseline_report(tmp_path) -> None:
     assert payload["reason"] == "no previous ebpf_io_latency baseline job found"
 
 
+def test_diagnostic_report_endpoint_aggregates_job_artifacts_and_baseline_diff(tmp_path) -> None:
+    runtime_dir = tmp_path / "runtime"
+    _write_latency_job(
+        runtime_dir=runtime_dir,
+        job_id="job-base",
+        created_at="2026-06-20T00:00:00+00:00",
+        tail_1ms_percent=1.0,
+        p99_bucket="10-100",
+    )
+    _write_latency_job(
+        runtime_dir=runtime_dir,
+        job_id="job-current",
+        created_at="2026-06-20T00:01:00+00:00",
+        tail_1ms_percent=25.0,
+        p99_bucket="1000-10000",
+    )
+    current_profile = runtime_dir / "profiles" / "job-current"
+    suggestions = current_profile / "suggestions.json"
+    suggestions.write_text(
+        json.dumps(
+            {
+                "source": "ebpf_io_latency",
+                "finding_count": 1,
+                "findings": [
+                    {
+                        "rule_id": "io_latency_tail_over_1ms",
+                        "title": "IO latency has visible tail over 1ms",
+                        "severity": "MEDIUM",
+                        "target": "read",
+                        "reason": "read tail is visible",
+                        "next_actions": ["inspect read path"],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    job_file = runtime_dir / "jobs" / "job-current" / "job.json"
+    job = json.loads(job_file.read_text(encoding="utf-8"))
+    job["artifacts"]["suggestions"] = str(suggestions)
+    job_file.write_text(json.dumps(job), encoding="utf-8")
+    client = TestClient(create_app(str(runtime_dir), process_inspector=FakeProcessInspector({})))
+
+    response = client.get("/api/jobs/job-current/report")
+
+    assert response.status_code == 200
+    report = response.json()
+    assert report["source"] == "diagnostic_report"
+    assert report["job_id"] == "job-current"
+    assert report["severity"] == "HIGH"
+    assert report["finding_count"] == 2
+    assert "inspect read path" in report["next_actions"]
+    assert {section["section_id"] for section in report["sections"]} >= {
+        "job_overview",
+        "ebpf_io_latency",
+        "baseline_diff",
+        "findings",
+    }
+
+
 def _write_latency_job(
     runtime_dir: Path,
     job_id: str,

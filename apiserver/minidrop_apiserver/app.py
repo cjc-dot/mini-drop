@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from minidrop_analysis.latency_diff import compare_latency_reports, no_latency_baseline_report
+from minidrop_analysis.report import build_diagnostic_report
 
 from .agent_store import AgentRegistry
 from .process import ProcessInspector
@@ -177,6 +178,41 @@ def create_app(runtime_dir: str | None = None, process_inspector: ProcessInspect
             current_job_id=job_id,
         )
 
+    @app.get("/api/jobs/{job_id}/report")
+    def get_diagnostic_report(job_id: str) -> dict:
+        job = store.get_job(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="job not found")
+
+        artifacts, warnings = _load_optional_json_artifacts(
+            job=job,
+            artifact_names=["hotspots", "suggestions", "ebpf_syscalls", "ebpf_io_latency"],
+            runtime_root=runtime_root,
+        )
+        baseline_diff = None
+        if artifacts.get("ebpf_io_latency"):
+            baseline_job = _find_previous_ebpf_latency_job(store.list_jobs(), job)
+            if baseline_job is None:
+                baseline_diff = no_latency_baseline_report(current_job_id=job_id)
+            else:
+                try:
+                    baseline_report = _load_json_artifact(baseline_job, "ebpf_io_latency", runtime_root)
+                    baseline_diff = compare_latency_reports(
+                        baseline=baseline_report,
+                        current=artifacts["ebpf_io_latency"],
+                        baseline_job_id=baseline_job["job_id"],
+                        current_job_id=job_id,
+                    )
+                except HTTPException as exc:
+                    warnings.append(f"baseline diff unavailable: {exc.detail}")
+
+        return build_diagnostic_report(
+            job=job,
+            artifacts=artifacts,
+            baseline_diff=baseline_diff,
+            data_quality=warnings,
+        )
+
     @app.post("/api/agents/{agent_id}/heartbeat")
     def agent_heartbeat(agent_id: str, request: AgentHeartbeatRequest) -> dict:
         return agents.record_heartbeat(
@@ -280,7 +316,34 @@ def _load_json_artifact(job: dict, artifact_name: str, runtime_root: Path) -> di
         raise HTTPException(status_code=403, detail="artifact outside runtime dir") from exc
     if not path.exists() or not path.is_file():
         raise HTTPException(status_code=404, detail="artifact file not found")
-    return json.loads(path.read_text(encoding="utf-8"))
+    return json.loads(path.read_text(encoding="utf-8-sig"))
+
+
+def _load_optional_json_artifacts(
+    job: dict,
+    artifact_names: list[str],
+    runtime_root: Path,
+) -> tuple[dict[str, dict | None], list[str]]:
+    artifacts: dict[str, dict | None] = {name: None for name in artifact_names}
+    warnings: list[str] = []
+    for artifact_name in artifact_names:
+        artifact_path = job.get("artifacts", {}).get(artifact_name)
+        if artifact_path is None:
+            continue
+        path = Path(artifact_path).expanduser().resolve()
+        try:
+            path.relative_to(runtime_root)
+        except ValueError:
+            warnings.append(f"{artifact_name} ignored: artifact outside runtime dir")
+            continue
+        if not path.exists() or not path.is_file():
+            warnings.append(f"{artifact_name} ignored: artifact file not found")
+            continue
+        try:
+            artifacts[artifact_name] = json.loads(path.read_text(encoding="utf-8-sig"))
+        except json.JSONDecodeError as exc:
+            warnings.append(f"{artifact_name} ignored: invalid json at line {exc.lineno}")
+    return artifacts, warnings
 
 
 def _find_previous_ebpf_latency_job(jobs: list[dict], current_job: dict) -> dict | None:

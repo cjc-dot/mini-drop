@@ -26,6 +26,7 @@ def test_web_frontend_uses_existing_api_routes() -> None:
     assert "/artifacts/ebpf_syscalls" in app_js
     assert "/artifacts/ebpf_io_latency" in app_js
     assert "/compare/ebpf-io-latency" in app_js
+    assert "/report" in app_js
     assert "collectorInput" in app_js
 
 
@@ -42,8 +43,10 @@ def test_web_frontend_contains_job_report_panel() -> None:
     assert 'id="ebpfLatencyChart"' in index
     assert 'id="ebpfLatencyBody"' in index
     assert 'id="ebpfDiffBody"' in index
+    assert 'id="diagnosisBody"' in index
     assert 'id="collectorInput"' in index
     assert "Rate/s" in index
+    assert "Diagnosis Report" in index
     assert "eBPF IO Latency" in index
     assert "eBPF Baseline Diff" in index
     assert 'data-report-job' in app_js
@@ -54,6 +57,7 @@ def test_web_frontend_contains_job_report_panel() -> None:
     assert "renderLatencyChart" in app_js
     assert "renderLatencyBar" in app_js
     assert "renderLatencyDiff" in app_js
+    assert "renderDiagnosticReport" in app_js
     assert "formatSigned" in app_js
 
 
@@ -68,6 +72,8 @@ def test_web_frontend_contains_latency_chart_styles() -> None:
     assert ".diff-grid" in styles
     assert ".diff-card" in styles
     assert ".badge.regressed" in styles
+    assert ".diagnosis-body" in styles
+    assert ".diagnosis-grid" in styles
 
 
 def test_web_ui_route_serves_index(tmp_path: Path) -> None:

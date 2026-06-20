@@ -242,6 +242,12 @@ tr.selected-row .link-button {
   color: #1c4ed8;
 }
 
+.badge.ok,
+.badge.low {
+  background: #d3f9d8;
+  color: var(--green);
+}
+
 .badge.regressed {
   background: #ffe3e3;
   color: var(--red);
@@ -341,6 +347,88 @@ a {
   height: 230px;
   border: 1px solid var(--line);
   background: #fff;
+}
+
+.diagnosis-body {
+  display: grid;
+  gap: 12px;
+}
+
+.diagnosis-headline {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.diagnosis-headline p {
+  margin: 2px 0 0;
+  line-height: 1.5;
+}
+
+.diagnosis-block {
+  display: grid;
+  gap: 8px;
+}
+
+.diagnosis-block h4,
+.diagnosis-section h4 {
+  margin: 0;
+  font-size: 13px;
+}
+
+.diagnosis-block ul,
+.diagnosis-block ol {
+  margin: 0 0 0 20px;
+  padding: 0;
+}
+
+.diagnosis-block li {
+  margin: 5px 0;
+  line-height: 1.45;
+}
+
+.diagnosis-block li span {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+}
+
+.diagnosis-block.warning {
+  color: var(--orange);
+}
+
+.diagnosis-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.diagnosis-section {
+  border: 1px solid #e6ebf3;
+  border-radius: 6px;
+  padding: 12px;
+  background: #fbfdff;
+}
+
+.diagnosis-section dl {
+  display: grid;
+  gap: 8px;
+  margin: 10px 0 0;
+}
+
+.diagnosis-section div {
+  min-width: 0;
+}
+
+.diagnosis-section dt {
+  color: var(--muted);
+  font-size: 12px;
+  margin-bottom: 3px;
+}
+
+.diagnosis-section dd {
+  margin: 0;
+  overflow-wrap: anywhere;
 }
 
 .compact-table {
@@ -573,6 +661,10 @@ a {
   }
 
   .diff-card dl {
+    grid-template-columns: 1fr;
+  }
+
+  .diagnosis-grid {
     grid-template-columns: 1fr;
   }
 }

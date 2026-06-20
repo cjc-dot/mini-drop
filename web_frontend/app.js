@@ -11,6 +11,8 @@ const jobReportSubtitle = document.querySelector("#jobReportSubtitle");
 const jobReportStatus = document.querySelector("#jobReportStatus");
 const jobReportContent = document.querySelector("#jobReportContent");
 const jobReportMeta = document.querySelector("#jobReportMeta");
+const diagnosisSummary = document.querySelector("#diagnosisSummary");
+const diagnosisBody = document.querySelector("#diagnosisBody");
 const flamegraphOpenLink = document.querySelector("#flamegraphOpenLink");
 const flamegraphFrame = document.querySelector("#flamegraphFrame");
 const hotspotSummary = document.querySelector("#hotspotSummary");
@@ -170,6 +172,81 @@ function renderSuggestions(report) {
       </article>
     `;
   }).join("");
+}
+
+function renderDiagnosticReport(report) {
+  if (!report) {
+    diagnosisSummary.textContent = "not available";
+    diagnosisBody.innerHTML = `<p class="empty">No diagnostic report</p>`;
+    return;
+  }
+
+  const severity = report.severity || "INFO";
+  const findings = Array.isArray(report.findings) ? report.findings : [];
+  const actions = Array.isArray(report.next_actions) ? report.next_actions : [];
+  const dataQuality = Array.isArray(report.data_quality) ? report.data_quality : [];
+  const sections = Array.isArray(report.sections) ? report.sections : [];
+  diagnosisSummary.textContent = `${severity} / ${report.finding_count || findings.length} finding(s)`;
+
+  const overviewSections = sections
+    .filter((section) => ["cpu_hotspots", "ebpf_syscalls", "ebpf_io_latency", "baseline_diff"].includes(section.section_id))
+    .slice(0, 4);
+
+  diagnosisBody.innerHTML = `
+    <div class="diagnosis-headline">
+      <span class="badge ${escapeHtml(String(severity).toLowerCase())}">${escapeHtml(severity)}</span>
+      <p>${escapeHtml(report.summary || "-")}</p>
+    </div>
+    ${findings.length ? `
+      <div class="diagnosis-block">
+        <h4>Key Findings</h4>
+        <ul>
+          ${findings.slice(0, 4).map((finding) => `
+            <li>
+              <strong>${escapeHtml(finding.title || finding.rule_id || "Finding")}</strong>
+              <span>${escapeHtml(finding.reason || finding.matched_condition || finding.advice || "")}</span>
+            </li>
+          `).join("")}
+        </ul>
+      </div>
+    ` : ""}
+    ${actions.length ? `
+      <div class="diagnosis-block">
+        <h4>Next Actions</h4>
+        <ol>
+          ${actions.slice(0, 5).map((action) => `<li>${escapeHtml(action)}</li>`).join("")}
+        </ol>
+      </div>
+    ` : ""}
+    ${overviewSections.length ? `
+      <div class="diagnosis-grid">
+        ${overviewSections.map(renderDiagnosticSection).join("")}
+      </div>
+    ` : ""}
+    ${dataQuality.length ? `
+      <div class="diagnosis-block warning">
+        <h4>Data Quality</h4>
+        <ul>${dataQuality.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
+      </div>
+    ` : ""}
+  `;
+}
+
+function renderDiagnosticSection(section) {
+  const items = Array.isArray(section.items) ? section.items : [];
+  return `
+    <article class="diagnosis-section">
+      <h4>${escapeHtml(section.title || section.section_id || "Section")}</h4>
+      <dl>
+        ${items.slice(0, 4).map((item) => `
+          <div>
+            <dt>${escapeHtml(item.label || "-")}</dt>
+            <dd>${escapeHtml(item.value ?? "-")}</dd>
+          </div>
+        `).join("")}
+      </dl>
+    </article>
+  `;
 }
 
 function formatFindingEvidence(evidence) {
@@ -341,12 +418,15 @@ async function loadJobReport(jobId, options = {}) {
   ebpfLatencyBody.innerHTML = `<tr><td colspan="4" class="empty">Loading...</td></tr>`;
   ebpfDiffSummary.textContent = "";
   ebpfDiffBody.innerHTML = `<p class="empty">Loading...</p>`;
+  diagnosisSummary.textContent = "";
+  diagnosisBody.innerHTML = `<p class="empty">Loading...</p>`;
   suggestionsBody.innerHTML = `<p class="empty">Loading...</p>`;
 
   try {
     const job = await fetchJson(`/api/jobs/${encodeURIComponent(jobId)}`);
     const artifacts = job.artifacts || {};
-    const [hotspots, suggestions, ebpfSyscalls, ebpfLatency, ebpfLatencyDiff] = await Promise.all([
+    const [diagnosticReport, hotspots, suggestions, ebpfSyscalls, ebpfLatency, ebpfLatencyDiff] = await Promise.all([
+      fetchJson(`/api/jobs/${encodeURIComponent(jobId)}/report`),
       artifacts.hotspots ? fetchJson(`/api/jobs/${encodeURIComponent(jobId)}/artifacts/hotspots`) : Promise.resolve(null),
       artifacts.suggestions ? fetchJson(`/api/jobs/${encodeURIComponent(jobId)}/artifacts/suggestions`) : Promise.resolve(null),
       artifacts.ebpf_syscalls ? fetchJson(`/api/jobs/${encodeURIComponent(jobId)}/artifacts/ebpf_syscalls`) : Promise.resolve(null),
@@ -362,6 +442,7 @@ async function loadJobReport(jobId, options = {}) {
       flamegraphOpenLink.href = flamegraphUrl;
       flamegraphOpenLink.classList.remove("hidden");
     }
+    renderDiagnosticReport(diagnosticReport);
     renderHotspots(hotspots);
     renderEbpfSyscalls(ebpfSyscalls);
     renderEbpfLatency(ebpfLatency);
