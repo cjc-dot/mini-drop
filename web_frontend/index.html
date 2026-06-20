@@ -34,6 +34,13 @@
             <span>Frequency</span>
             <input id="frequencyInput" name="frequency" type="number" min="1" value="99" required />
           </label>
+          <label>
+            <span>Collector</span>
+            <select id="collectorInput" name="collector">
+              <option value="perf">perf CPU flame graph</option>
+              <option value="ebpf_syscall">eBPF syscall counter</option>
+            </select>
+          </label>
           <button type="submit">Create</button>
         </form>
       </section>
@@ -117,6 +124,24 @@
                     </tr>
                   </thead>
                   <tbody id="hotspotsBody"></tbody>
+                </table>
+              </div>
+            </section>
+
+            <section class="report-section">
+              <div class="section-title">
+                <h3>eBPF Syscalls</h3>
+                <span id="ebpfSummary" class="muted"></span>
+              </div>
+              <div class="table-wrap">
+                <table class="compact-table">
+                  <thead>
+                    <tr>
+                      <th>Event</th>
+                      <th>Count</th>
+                    </tr>
+                  </thead>
+                  <tbody id="ebpfBody"></tbody>
                 </table>
               </div>
             </section>

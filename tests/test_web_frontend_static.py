@@ -23,6 +23,8 @@ def test_web_frontend_uses_existing_api_routes() -> None:
     assert 'fetchJson("/api/jobs", {' in app_js
     assert "/artifacts/hotspots" in app_js
     assert "/artifacts/suggestions" in app_js
+    assert "/artifacts/ebpf_syscalls" in app_js
+    assert "collectorInput" in app_js
 
 
 def test_web_frontend_contains_job_report_panel() -> None:
@@ -34,6 +36,8 @@ def test_web_frontend_contains_job_report_panel() -> None:
     assert 'class="analysis-workbench"' in index
     assert 'id="hotspotsBody"' in index
     assert 'id="suggestionsBody"' in index
+    assert 'id="ebpfBody"' in index
+    assert 'id="collectorInput"' in index
     assert 'data-report-job' in app_js
     assert "selectedJobId" in app_js
     assert "loadJobReport" in app_js
@@ -63,6 +67,8 @@ def test_artifact_route_serves_known_artifacts_inside_runtime(tmp_path: Path) ->
     hotspots.write_text('{"hotspots":[]}', encoding="utf-8")
     suggestions = profile_dir / "suggestions.json"
     suggestions.write_text('{"findings":[]}', encoding="utf-8")
+    ebpf_syscalls = profile_dir / "ebpf_syscalls.json"
+    ebpf_syscalls.write_text('{"events":[{"event":"read","count":1}]}', encoding="utf-8")
     job = {
         "job_id": "job-1",
         "status": "DONE",
@@ -77,6 +83,7 @@ def test_artifact_route_serves_known_artifacts_inside_runtime(tmp_path: Path) ->
             "flamegraph": str(flamegraph),
             "hotspots": str(hotspots),
             "suggestions": str(suggestions),
+            "ebpf_syscalls": str(ebpf_syscalls),
         },
         "reason": "job completed successfully",
         "error_message": None,
@@ -89,6 +96,7 @@ def test_artifact_route_serves_known_artifacts_inside_runtime(tmp_path: Path) ->
     response = client.get("/api/jobs/job-1/artifacts/flamegraph")
     hotspots_response = client.get("/api/jobs/job-1/artifacts/hotspots")
     suggestions_response = client.get("/api/jobs/job-1/artifacts/suggestions")
+    ebpf_response = client.get("/api/jobs/job-1/artifacts/ebpf_syscalls")
 
     assert response.status_code == 200
     assert response.text == "<svg>ok</svg>"
@@ -96,6 +104,8 @@ def test_artifact_route_serves_known_artifacts_inside_runtime(tmp_path: Path) ->
     assert hotspots_response.json() == {"hotspots": []}
     assert suggestions_response.status_code == 200
     assert suggestions_response.json() == {"findings": []}
+    assert ebpf_response.status_code == 200
+    assert ebpf_response.json() == {"events": [{"event": "read", "count": 1}]}
 
 
 def test_artifact_route_rejects_file_outside_runtime(tmp_path: Path) -> None:

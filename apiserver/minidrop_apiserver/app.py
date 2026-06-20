@@ -18,7 +18,7 @@ class CreateJobRequest(BaseModel):
     pid: int = Field(gt=0)
     duration_seconds: int = Field(default=10, gt=0)
     sample_frequency: int = Field(default=99, gt=0)
-    collector: Literal["perf"] = "perf"
+    collector: Literal["perf", "ebpf_syscall"] = "perf"
 
 
 class AgentHeartbeatRequest(BaseModel):
@@ -119,7 +119,15 @@ def create_app(runtime_dir: str | None = None, process_inspector: ProcessInspect
     @app.get("/api/jobs/{job_id}/artifacts/{artifact_name}")
     def get_job_artifact(
         job_id: str,
-        artifact_name: Literal["flamegraph", "hotspots", "suggestions", "suggestions_markdown", "summary"],
+        artifact_name: Literal[
+            "flamegraph",
+            "hotspots",
+            "suggestions",
+            "suggestions_markdown",
+            "ebpf_raw",
+            "ebpf_syscalls",
+            "summary",
+        ],
     ) -> FileResponse:
         job = store.get_job(job_id)
         if job is None:

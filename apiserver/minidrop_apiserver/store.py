@@ -32,6 +32,8 @@ ARTIFACT_FILENAMES = {
     "hotspots": "hotspots.json",
     "suggestions": "suggestions.json",
     "suggestions_markdown": "suggestions.md",
+    "ebpf_raw": "ebpf_syscalls.raw",
+    "ebpf_syscalls": "ebpf_syscalls.json",
     "summary": "summary.json",
 }
 

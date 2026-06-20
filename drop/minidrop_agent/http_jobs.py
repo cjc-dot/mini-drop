@@ -10,8 +10,9 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
-from minidrop_analysis.perf import PerfCollector, ProfileSummary
+from minidrop_analysis.perf import ProfileSummary
 
+from .collectors import build_collector
 from .job import JobResult, JobSpec
 from .process import ProcessInspector
 
@@ -23,6 +24,8 @@ UPLOADABLE_ARTIFACTS = {
     "hotspots",
     "suggestions",
     "suggestions_markdown",
+    "ebpf_raw",
+    "ebpf_syscalls",
     "summary",
 }
 
@@ -149,7 +152,7 @@ class HttpJobRunner:
     ) -> None:
         self.runtime_dir = Path(runtime_dir).expanduser().resolve()
         self.agent_id = agent_id
-        self.collector = collector or PerfCollector()
+        self.collector = collector
         self.client = client or ServerJobClient(server_url)
         self.process_inspector = process_inspector or ProcessInspector()
         self.lease_seconds = lease_seconds
@@ -218,7 +221,8 @@ class HttpJobRunner:
         lease_renewer.start()
         try:
             try:
-                summary = self.collector.collect(
+                collector = self.collector or build_collector(spec.collector)
+                summary = collector.collect(
                     pid=spec.pid,
                     duration_seconds=spec.duration_seconds,
                     sample_frequency=spec.sample_frequency,

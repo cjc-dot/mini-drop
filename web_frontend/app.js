@@ -17,6 +17,8 @@ const hotspotSummary = document.querySelector("#hotspotSummary");
 const hotspotsBody = document.querySelector("#hotspotsBody");
 const suggestionSummary = document.querySelector("#suggestionSummary");
 const suggestionsBody = document.querySelector("#suggestionsBody");
+const ebpfSummary = document.querySelector("#ebpfSummary");
+const ebpfBody = document.querySelector("#ebpfBody");
 let selectedJobId = null;
 
 async function fetchJson(url, options) {
@@ -77,7 +79,12 @@ function renderJobs(jobs) {
 
   jobsBody.innerHTML = jobs.map((job) => {
     const spec = job.spec || {};
-    const hasReport = job.artifacts && (job.artifacts.hotspots || job.artifacts.suggestions || job.artifacts.flamegraph);
+    const hasReport = job.artifacts && (
+      job.artifacts.hotspots
+      || job.artifacts.suggestions
+      || job.artifacts.flamegraph
+      || job.artifacts.ebpf_syscalls
+    );
     const result = hasReport ? "analysis ready" : (job.reason || "-");
     const selectedClass = job.job_id === selectedJobId ? "selected-row" : "";
     return `
@@ -97,6 +104,7 @@ function renderReportMeta(job) {
   const items = [
     ["Status", statusBadge(job.status)],
     ["PID", escapeHtml(spec.pid || "-")],
+    ["Collector", escapeHtml(spec.collector || "-")],
     ["Duration", `${escapeHtml(spec.duration_seconds || "-")}s`],
     ["Frequency", `${escapeHtml(spec.sample_frequency || "-")}Hz`],
     ["Reason", escapeHtml(job.reason || "-")],
@@ -157,6 +165,22 @@ function renderSuggestions(report) {
   }).join("");
 }
 
+function renderEbpfSyscalls(report) {
+  const events = report && Array.isArray(report.events) ? report.events : [];
+  ebpfSummary.textContent = report ? `${report.total_events || 0} event(s)` : "not available";
+  if (events.length === 0) {
+    ebpfBody.innerHTML = `<tr><td colspan="2" class="empty">No eBPF syscall data</td></tr>`;
+    return;
+  }
+
+  ebpfBody.innerHTML = events.map((event) => `
+    <tr>
+      <td class="mono">${escapeHtml(event.event || "-")}</td>
+      <td>${escapeHtml(event.count ?? 0)}</td>
+    </tr>
+  `).join("");
+}
+
 async function loadJobReport(jobId, options = {}) {
   selectedJobId = jobId;
   document.querySelectorAll("#jobsBody tr").forEach((row) => row.classList.remove("selected-row"));
@@ -170,14 +194,16 @@ async function loadJobReport(jobId, options = {}) {
   flamegraphFrame.removeAttribute("src");
   flamegraphOpenLink.classList.add("hidden");
   hotspotsBody.innerHTML = `<tr><td colspan="5" class="empty">Loading...</td></tr>`;
+  ebpfBody.innerHTML = `<tr><td colspan="2" class="empty">Loading...</td></tr>`;
   suggestionsBody.innerHTML = `<p class="empty">Loading...</p>`;
 
   try {
     const job = await fetchJson(`/api/jobs/${encodeURIComponent(jobId)}`);
     const artifacts = job.artifacts || {};
-    const [hotspots, suggestions] = await Promise.all([
+    const [hotspots, suggestions, ebpfSyscalls] = await Promise.all([
       artifacts.hotspots ? fetchJson(`/api/jobs/${encodeURIComponent(jobId)}/artifacts/hotspots`) : Promise.resolve(null),
       artifacts.suggestions ? fetchJson(`/api/jobs/${encodeURIComponent(jobId)}/artifacts/suggestions`) : Promise.resolve(null),
+      artifacts.ebpf_syscalls ? fetchJson(`/api/jobs/${encodeURIComponent(jobId)}/artifacts/ebpf_syscalls`) : Promise.resolve(null),
     ]);
 
     renderReportMeta(job);
@@ -189,6 +215,7 @@ async function loadJobReport(jobId, options = {}) {
       flamegraphOpenLink.classList.remove("hidden");
     }
     renderHotspots(hotspots);
+    renderEbpfSyscalls(ebpfSyscalls);
     renderSuggestions(suggestions);
     jobReportStatus.textContent = job.status === "DONE" ? "Analysis ready" : "Artifacts may be incomplete";
     if (options.scroll && window.matchMedia("(max-width: 1180px)").matches) {
@@ -209,7 +236,12 @@ async function refreshDashboard() {
     renderJobs(jobs);
     renderAgents(agents);
     if (!selectedJobId) {
-      const latestReportJob = jobs.find((job) => job.artifacts && (job.artifacts.hotspots || job.artifacts.suggestions || job.artifacts.flamegraph));
+      const latestReportJob = jobs.find((job) => job.artifacts && (
+        job.artifacts.hotspots
+        || job.artifacts.suggestions
+        || job.artifacts.flamegraph
+        || job.artifacts.ebpf_syscalls
+      ));
       if (latestReportJob) {
         loadJobReport(latestReportJob.job_id);
       }
@@ -228,6 +260,7 @@ createJobForm.addEventListener("submit", async (event) => {
     pid: Number(document.querySelector("#pidInput").value),
     duration_seconds: Number(document.querySelector("#durationInput").value),
     sample_frequency: Number(document.querySelector("#frequencyInput").value),
+    collector: document.querySelector("#collectorInput").value,
   };
 
   try {

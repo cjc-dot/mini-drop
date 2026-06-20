@@ -8,6 +8,7 @@ JOB_ID ?= demo-agent
 PENDING_JOB_ID ?=
 DURATION ?= 10
 FREQUENCY ?= 99
+COLLECTOR ?= perf
 API_HOST ?= 127.0.0.1
 API_PORT ?= 8000
 AGENT_ID ?= local-agent
@@ -21,7 +22,7 @@ DISABLE_PID_CHECK ?= 0
 JOB_SOURCE ?= server
 LEASE_SECONDS ?= 60
 
-.PHONY: init build-workload collect agent-run agent-run-pending agent-heartbeat agent-daemon api-run api-maintenance test clean-runtime demo agent-demo
+.PHONY: init build-workload build-io-workload collect agent-run agent-run-pending agent-heartbeat agent-daemon api-run api-maintenance test clean-runtime demo agent-demo
 
 init:
 	mkdir -p $(MINIDROP_RUNTIME)/builds
@@ -35,12 +36,18 @@ build-workload: init
 		-o $(MINIDROP_RUNTIME)/builds/cpu_hotspot \
 		workloads/cpu_hotspot.c
 
+build-io-workload: init
+	gcc -O2 -g -fno-omit-frame-pointer \
+		-o $(MINIDROP_RUNTIME)/builds/io_syscall_hotspot \
+		workloads/io_syscall_hotspot.c
+
 collect:
 	@if [ -z "$(PID)" ]; then echo "Usage: make collect PID=<target-pid> [DURATION=10] [FREQUENCY=99] [PROFILE_ID=name]"; exit 2; fi
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m minidrop_analysis collect \
 		--pid $(PID) \
 		--duration $(DURATION) \
 		--frequency $(FREQUENCY) \
+		--collector $(COLLECTOR) \
 		--output $(MINIDROP_RUNTIME)/profiles/$(PROFILE_ID)
 
 agent-run:

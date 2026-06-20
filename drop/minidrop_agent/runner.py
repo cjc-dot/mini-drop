@@ -4,8 +4,9 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Protocol
 
-from minidrop_analysis.perf import PerfCollector, ProfileSummary
+from minidrop_analysis.perf import ProfileSummary
 
+from .collectors import build_collector
 from .job import JobResult, JobSpec
 from .store import JobStore
 
@@ -19,7 +20,7 @@ class LocalAgent:
     def __init__(self, runtime_dir: str = "~/mini-drop-runtime", collector: Collector | None = None) -> None:
         self.runtime_dir = Path(runtime_dir).expanduser().resolve()
         self.store = JobStore(str(self.runtime_dir))
-        self.collector = collector or PerfCollector()
+        self.collector = collector
 
     def run(self, spec: JobSpec, initialize: bool = True, mark_running: bool = True) -> JobResult:
         output_dir = self.runtime_dir / "profiles" / spec.job_id
@@ -29,7 +30,8 @@ class LocalAgent:
         try:
             if mark_running:
                 self.store.transition(spec, "RUNNING", "collector started", expected_status="PENDING")
-            summary = self.collector.collect(
+            collector = self.collector or build_collector(spec.collector)
+            summary = collector.collect(
                 pid=spec.pid,
                 duration_seconds=spec.duration_seconds,
                 sample_frequency=spec.sample_frequency,
