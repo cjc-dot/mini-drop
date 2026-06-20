@@ -53,6 +53,10 @@ def _build_sections(
     if latency:
         sections.append(_latency_section(latency))
 
+    pyspy = artifacts.get("pyspy_profile")
+    if pyspy:
+        sections.append(_pyspy_section(pyspy))
+
     if baseline_diff:
         sections.append(_baseline_diff_section(baseline_diff))
 
@@ -155,6 +159,28 @@ def _latency_section(report: dict) -> dict:
             )
         )
     return {"section_id": "ebpf_io_latency", "title": "eBPF IO Latency", "items": items}
+
+
+def _pyspy_section(report: dict) -> dict:
+    hotspots = report.get("hotspots", []) if isinstance(report.get("hotspots"), list) else []
+    items = [
+        _item("Total samples", report.get("total_samples", 0)),
+        _item("Tool", report.get("tool_version", "py-spy")),
+    ]
+    for hotspot in hotspots[:3]:
+        items.append(
+            _item(
+                hotspot.get("function", "-"),
+                f"self {hotspot.get('self_percent', 0)}% / incl {hotspot.get('inclusive_percent', 0)}%",
+                evidence={
+                    "file": hotspot.get("file"),
+                    "line": hotspot.get("line"),
+                    "self_samples": hotspot.get("self_samples", 0),
+                    "inclusive_samples": hotspot.get("inclusive_samples", 0),
+                },
+            )
+        )
+    return {"section_id": "python_profile", "title": "Python Profile", "items": items}
 
 
 def _baseline_diff_section(diff: dict) -> dict:

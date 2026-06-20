@@ -52,6 +52,21 @@ def test_build_diagnostic_report_merges_artifact_findings_and_baseline_diff() ->
                 }
             ],
         },
+        "pyspy_profile": {
+            "total_samples": 10,
+            "tool_version": "py-spy 0.test",
+            "hotspots": [
+                {
+                    "function": "hot_python_loop",
+                    "self_percent": 80.0,
+                    "inclusive_percent": 80.0,
+                    "self_samples": 8,
+                    "inclusive_samples": 8,
+                    "file": "workloads/python_hotspot.py",
+                    "line": 8,
+                }
+            ],
+        },
     }
     baseline_diff = {
         "comparison_available": True,
@@ -89,6 +104,7 @@ def test_build_diagnostic_report_merges_artifact_findings_and_baseline_diff() ->
         "cpu_hotspots",
         "ebpf_syscalls",
         "ebpf_io_latency",
+        "python_profile",
         "baseline_diff",
         "findings",
     }

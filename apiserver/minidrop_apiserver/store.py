@@ -36,6 +36,8 @@ ARTIFACT_FILENAMES = {
     "ebpf_syscalls": "ebpf_syscalls.json",
     "ebpf_io_latency_raw": "ebpf_io_latency.raw",
     "ebpf_io_latency": "ebpf_io_latency.json",
+    "pyspy_speedscope": "py_spy.speedscope.json",
+    "pyspy_profile": "py_spy_profile.json",
     "summary": "summary.json",
 }
 

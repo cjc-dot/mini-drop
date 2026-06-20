@@ -40,6 +40,7 @@
               <option value="perf">perf CPU flame graph</option>
               <option value="ebpf_syscall">eBPF syscall counter</option>
               <option value="ebpf_io_latency">eBPF IO latency</option>
+              <option value="py_spy">py-spy Python profile</option>
             </select>
           </label>
           <button type="submit">Create</button>
@@ -183,6 +184,26 @@
                 <span id="ebpfDiffSummary" class="muted"></span>
               </div>
               <div id="ebpfDiffBody" class="diff-grid"></div>
+            </section>
+
+            <section class="report-section">
+              <div class="section-title">
+                <h3>Python Profile</h3>
+                <span id="pyspySummary" class="muted"></span>
+              </div>
+              <div class="table-wrap">
+                <table class="compact-table">
+                  <thead>
+                    <tr>
+                      <th>Function</th>
+                      <th>Self %</th>
+                      <th>Incl. %</th>
+                      <th>Location</th>
+                    </tr>
+                  </thead>
+                  <tbody id="pyspyBody"></tbody>
+                </table>
+              </div>
             </section>
 
             <section class="report-section">

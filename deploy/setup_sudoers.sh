@@ -27,13 +27,14 @@ find_tool() {
 
 perf_bin="$(find_tool perf)"
 bpftrace_bin="$(find_tool bpftrace)"
+py_spy_bin="$(find_tool py-spy)"
 sudoers_file="/etc/sudoers.d/mini-drop-tools"
 tmp_file="$(mktemp)"
 
 cat > "$tmp_file" <<EOF
 # Mini-Drop profiling tools.
 # This file allows the target user to run only the required collectors without a password.
-$target_user ALL=(root) NOPASSWD: $perf_bin, $bpftrace_bin
+$target_user ALL=(root) NOPASSWD: $perf_bin, $bpftrace_bin, $py_spy_bin
 EOF
 
 chmod 0440 "$tmp_file"
@@ -46,7 +47,9 @@ echo "User: $target_user"
 echo "Tools:"
 echo "  $perf_bin"
 echo "  $bpftrace_bin"
+echo "  $py_spy_bin"
 echo
 echo "Verify with:"
 echo "  sudo -n $perf_bin --version"
 echo "  sudo -n $bpftrace_bin --version"
+echo "  sudo -n $py_spy_bin --version"

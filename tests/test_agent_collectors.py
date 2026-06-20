@@ -2,6 +2,7 @@ from minidrop_agent.collectors import build_collector
 from minidrop_analysis.ebpf import EbpfSyscallCollector
 from minidrop_analysis.ebpf_latency import EbpfIoLatencyCollector
 from minidrop_analysis.perf import PerfCollector
+from minidrop_analysis.pyspy import PySpyCollector
 
 
 def test_build_collector_returns_perf_collector() -> None:
@@ -14,6 +15,10 @@ def test_build_collector_returns_ebpf_syscall_collector() -> None:
 
 def test_build_collector_returns_ebpf_io_latency_collector() -> None:
     assert isinstance(build_collector("ebpf_io_latency"), EbpfIoLatencyCollector)
+
+
+def test_build_collector_returns_pyspy_collector() -> None:
+    assert isinstance(build_collector("py_spy"), PySpyCollector)
 
 
 def test_build_collector_rejects_unknown_collector() -> None:

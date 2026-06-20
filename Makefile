@@ -25,7 +25,7 @@ BASELINE ?=
 CURRENT ?=
 DIFF_OUTPUT ?= $(MINIDROP_RUNTIME)/profiles/ebpf-latency-diff.json
 
-.PHONY: init check-tools setup-sudoers build-workload build-io-workload build-latency-workload collect latency-diff agent-run agent-run-pending agent-heartbeat agent-daemon api-run api-maintenance test clean-runtime demo agent-demo
+.PHONY: init check-tools setup-sudoers build-workload build-io-workload build-latency-workload collect latency-diff agent-run agent-run-pending agent-heartbeat agent-daemon api-run api-maintenance test clean-runtime demo agent-demo python-demo
 
 init:
 	mkdir -p $(MINIDROP_RUNTIME)/builds
@@ -38,7 +38,7 @@ check-tools:
 	bash deploy/check_tools.sh
 
 setup-sudoers:
-	@echo "This command configures passwordless sudo for perf and bpftrace."
+	@echo "This command configures passwordless sudo for perf, bpftrace, and py-spy."
 	@echo "It writes /etc/sudoers.d/mini-drop-tools and requires your sudo password once."
 	sudo bash deploy/setup_sudoers.sh
 
@@ -138,6 +138,15 @@ agent-demo: build-workload
 	trap 'kill $$pid >/dev/null 2>&1 || true' EXIT; \
 	sleep 1; \
 	$(MAKE) agent-run PID=$$pid JOB_ID=$(JOB_ID) DURATION=$(DURATION) FREQUENCY=$(FREQUENCY)
+
+python-demo: init
+	@set -euo pipefail; \
+	$(PYTHON) workloads/python_hotspot.py > $(MINIDROP_RUNTIME)/logs/python_hotspot.log 2>&1 & \
+	pid=$$!; \
+	echo "Started python_hotspot pid=$$pid"; \
+	trap 'kill $$pid >/dev/null 2>&1 || true' EXIT; \
+	sleep 1; \
+	$(MAKE) collect PID=$$pid PROFILE_ID=python-demo COLLECTOR=py_spy DURATION=$(DURATION) FREQUENCY=$(FREQUENCY)
 
 test:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m pytest tests

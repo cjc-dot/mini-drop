@@ -8,6 +8,7 @@ from .ebpf import EbpfSyscallCollector
 from .ebpf_latency import EbpfIoLatencyCollector
 from .latency_diff import compare_latency_reports
 from .perf import PerfCollector
+from .pyspy import PySpyCollector
 
 
 def _positive_int(value: str) -> int:
@@ -26,9 +27,10 @@ def build_parser() -> argparse.ArgumentParser:
     collect.add_argument("--duration", default=10, type=_positive_int)
     collect.add_argument("--frequency", default=99, type=_positive_int)
     collect.add_argument("--output", required=True)
-    collect.add_argument("--collector", default="perf", choices=["perf", "ebpf_syscall", "ebpf_io_latency"])
+    collect.add_argument("--collector", default="perf", choices=["perf", "ebpf_syscall", "ebpf_io_latency", "py_spy"])
     collect.add_argument("--perf-bin", default="perf")
     collect.add_argument("--bpftrace-bin", default="bpftrace")
+    collect.add_argument("--py-spy-bin", default="py-spy")
 
     compare_latency = subcommands.add_parser("compare-latency", help="compare two eBPF IO latency reports")
     compare_latency.add_argument("--baseline", required=True, help="baseline ebpf_io_latency.json")
@@ -50,6 +52,8 @@ def main(argv: list[str] | None = None) -> int:
             collector = EbpfSyscallCollector(bpftrace_bin=args.bpftrace_bin)
         elif args.collector == "ebpf_io_latency":
             collector = EbpfIoLatencyCollector(bpftrace_bin=args.bpftrace_bin)
+        elif args.collector == "py_spy":
+            collector = PySpyCollector(py_spy_bin=args.py_spy_bin)
         else:
             raise AssertionError(f"unhandled collector: {args.collector}")
         summary = collector.collect(

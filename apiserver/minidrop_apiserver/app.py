@@ -22,7 +22,7 @@ class CreateJobRequest(BaseModel):
     pid: int = Field(gt=0)
     duration_seconds: int = Field(default=10, gt=0)
     sample_frequency: int = Field(default=99, gt=0)
-    collector: Literal["perf", "ebpf_syscall", "ebpf_io_latency"] = "perf"
+    collector: Literal["perf", "ebpf_syscall", "ebpf_io_latency", "py_spy"] = "perf"
 
 
 class AgentHeartbeatRequest(BaseModel):
@@ -132,6 +132,8 @@ def create_app(runtime_dir: str | None = None, process_inspector: ProcessInspect
             "ebpf_syscalls",
             "ebpf_io_latency_raw",
             "ebpf_io_latency",
+            "pyspy_speedscope",
+            "pyspy_profile",
             "summary",
         ],
     ) -> FileResponse:
@@ -186,7 +188,7 @@ def create_app(runtime_dir: str | None = None, process_inspector: ProcessInspect
 
         artifacts, warnings = _load_optional_json_artifacts(
             job=job,
-            artifact_names=["hotspots", "suggestions", "ebpf_syscalls", "ebpf_io_latency"],
+            artifact_names=["hotspots", "suggestions", "ebpf_syscalls", "ebpf_io_latency", "pyspy_profile"],
             runtime_root=runtime_root,
         )
         baseline_diff = None

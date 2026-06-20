@@ -26,6 +26,8 @@ const ebpfLatencyBody = document.querySelector("#ebpfLatencyBody");
 const ebpfLatencyChart = document.querySelector("#ebpfLatencyChart");
 const ebpfDiffSummary = document.querySelector("#ebpfDiffSummary");
 const ebpfDiffBody = document.querySelector("#ebpfDiffBody");
+const pyspySummary = document.querySelector("#pyspySummary");
+const pyspyBody = document.querySelector("#pyspyBody");
 let selectedJobId = null;
 
 async function fetchJson(url, options) {
@@ -92,6 +94,7 @@ function renderJobs(jobs) {
       || job.artifacts.flamegraph
       || job.artifacts.ebpf_syscalls
       || job.artifacts.ebpf_io_latency
+      || job.artifacts.pyspy_profile
     );
     const result = hasReport ? "analysis ready" : (job.reason || "-");
     const selectedClass = job.job_id === selectedJobId ? "selected-row" : "";
@@ -189,7 +192,7 @@ function renderDiagnosticReport(report) {
   diagnosisSummary.textContent = `${severity} / ${report.finding_count || findings.length} finding(s)`;
 
   const overviewSections = sections
-    .filter((section) => ["cpu_hotspots", "ebpf_syscalls", "ebpf_io_latency", "baseline_diff"].includes(section.section_id))
+    .filter((section) => ["cpu_hotspots", "ebpf_syscalls", "ebpf_io_latency", "python_profile", "baseline_diff"].includes(section.section_id))
     .slice(0, 4);
 
   diagnosisBody.innerHTML = `
@@ -395,6 +398,27 @@ function renderLatencyDiff(report) {
   }).join("");
 }
 
+function renderPyspyProfile(report) {
+  const hotspots = report && Array.isArray(report.hotspots) ? report.hotspots : [];
+  pyspySummary.textContent = report ? `${report.total_samples || 0} samples` : "not available";
+  if (hotspots.length === 0) {
+    pyspyBody.innerHTML = `<tr><td colspan="4" class="empty">No Python profile data</td></tr>`;
+    return;
+  }
+
+  pyspyBody.innerHTML = hotspots.slice(0, 10).map((hotspot) => {
+    const location = hotspot.file ? `${hotspot.file}:${hotspot.line || "-"}` : "-";
+    return `
+      <tr>
+        <td class="mono">${escapeHtml(hotspot.function || "-")}</td>
+        <td>${escapeHtml(hotspot.self_percent ?? 0)}%</td>
+        <td>${escapeHtml(hotspot.inclusive_percent ?? 0)}%</td>
+        <td class="mono">${escapeHtml(location)}</td>
+      </tr>
+    `;
+  }).join("");
+}
+
 function formatSigned(value) {
   if (value > 0) return `+${value}`;
   return String(value);
@@ -418,6 +442,8 @@ async function loadJobReport(jobId, options = {}) {
   ebpfLatencyBody.innerHTML = `<tr><td colspan="4" class="empty">Loading...</td></tr>`;
   ebpfDiffSummary.textContent = "";
   ebpfDiffBody.innerHTML = `<p class="empty">Loading...</p>`;
+  pyspySummary.textContent = "";
+  pyspyBody.innerHTML = `<tr><td colspan="4" class="empty">Loading...</td></tr>`;
   diagnosisSummary.textContent = "";
   diagnosisBody.innerHTML = `<p class="empty">Loading...</p>`;
   suggestionsBody.innerHTML = `<p class="empty">Loading...</p>`;
@@ -425,13 +451,14 @@ async function loadJobReport(jobId, options = {}) {
   try {
     const job = await fetchJson(`/api/jobs/${encodeURIComponent(jobId)}`);
     const artifacts = job.artifacts || {};
-    const [diagnosticReport, hotspots, suggestions, ebpfSyscalls, ebpfLatency, ebpfLatencyDiff] = await Promise.all([
+    const [diagnosticReport, hotspots, suggestions, ebpfSyscalls, ebpfLatency, ebpfLatencyDiff, pyspyProfile] = await Promise.all([
       fetchJson(`/api/jobs/${encodeURIComponent(jobId)}/report`),
       artifacts.hotspots ? fetchJson(`/api/jobs/${encodeURIComponent(jobId)}/artifacts/hotspots`) : Promise.resolve(null),
       artifacts.suggestions ? fetchJson(`/api/jobs/${encodeURIComponent(jobId)}/artifacts/suggestions`) : Promise.resolve(null),
       artifacts.ebpf_syscalls ? fetchJson(`/api/jobs/${encodeURIComponent(jobId)}/artifacts/ebpf_syscalls`) : Promise.resolve(null),
       artifacts.ebpf_io_latency ? fetchJson(`/api/jobs/${encodeURIComponent(jobId)}/artifacts/ebpf_io_latency`) : Promise.resolve(null),
       artifacts.ebpf_io_latency ? fetchJson(`/api/jobs/${encodeURIComponent(jobId)}/compare/ebpf-io-latency`) : Promise.resolve(null),
+      artifacts.pyspy_profile ? fetchJson(`/api/jobs/${encodeURIComponent(jobId)}/artifacts/pyspy_profile`) : Promise.resolve(null),
     ]);
 
     renderReportMeta(job);
@@ -447,6 +474,7 @@ async function loadJobReport(jobId, options = {}) {
     renderEbpfSyscalls(ebpfSyscalls);
     renderEbpfLatency(ebpfLatency);
     renderLatencyDiff(ebpfLatencyDiff);
+    renderPyspyProfile(pyspyProfile);
     renderSuggestions(suggestions);
     jobReportStatus.textContent = job.status === "DONE" ? "Analysis ready" : "Artifacts may be incomplete";
     if (options.scroll && window.matchMedia("(max-width: 1180px)").matches) {
@@ -473,6 +501,7 @@ async function refreshDashboard() {
         || job.artifacts.flamegraph
         || job.artifacts.ebpf_syscalls
         || job.artifacts.ebpf_io_latency
+        || job.artifacts.pyspy_profile
       ));
       if (latestReportJob) {
         loadJobReport(latestReportJob.job_id);

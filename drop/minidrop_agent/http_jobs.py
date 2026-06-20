@@ -28,6 +28,8 @@ UPLOADABLE_ARTIFACTS = {
     "ebpf_syscalls",
     "ebpf_io_latency_raw",
     "ebpf_io_latency",
+    "pyspy_speedscope",
+    "pyspy_profile",
     "summary",
 }
 

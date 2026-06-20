@@ -86,6 +86,23 @@ def test_create_job_accepts_ebpf_io_latency_collector(tmp_path) -> None:
     assert response.json()["spec"]["collector"] == "ebpf_io_latency"
 
 
+def test_create_job_accepts_py_spy_collector(tmp_path) -> None:
+    client = TestClient(create_app(str(tmp_path), process_inspector=FakeProcessInspector({1234: {"pid": 1234}})))
+
+    response = client.post(
+        "/api/jobs",
+        json={
+            "pid": 1234,
+            "duration_seconds": 10,
+            "sample_frequency": 99,
+            "collector": "py_spy",
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json()["spec"]["collector"] == "py_spy"
+
+
 def test_agent_claim_and_finish_job_over_http(tmp_path) -> None:
     target = {
         "pid": 1234,
@@ -333,6 +350,62 @@ def test_diagnostic_report_endpoint_aggregates_job_artifacts_and_baseline_diff(t
         "baseline_diff",
         "findings",
     }
+
+
+def test_diagnostic_report_endpoint_includes_python_profile_section(tmp_path) -> None:
+    runtime_dir = tmp_path / "runtime"
+    profile_dir = runtime_dir / "profiles" / "job-python"
+    job_dir = runtime_dir / "jobs" / "job-python"
+    profile_dir.mkdir(parents=True)
+    job_dir.mkdir(parents=True)
+    pyspy_profile = profile_dir / "py_spy_profile.json"
+    pyspy_profile.write_text(
+        json.dumps(
+            {
+                "collector": "py_spy",
+                "total_samples": 10,
+                "tool_version": "py-spy 0.test",
+                "hotspots": [
+                    {
+                        "function": "hot_python_loop",
+                        "file": "workloads/python_hotspot.py",
+                        "line": 8,
+                        "self_samples": 8,
+                        "inclusive_samples": 8,
+                        "self_percent": 80.0,
+                        "inclusive_percent": 80.0,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    job = {
+        "job_id": "job-python",
+        "status": "DONE",
+        "reason": "job completed successfully",
+        "spec": {
+            "job_id": "job-python",
+            "pid": 1234,
+            "duration_seconds": 5,
+            "sample_frequency": 99,
+            "collector": "py_spy",
+            "target": {"comm": "python3"},
+        },
+        "artifacts": {"pyspy_profile": str(pyspy_profile)},
+        "error_message": None,
+        "created_at": "2026-06-16T00:00:00+00:00",
+        "updated_at": "2026-06-16T00:00:10+00:00",
+    }
+    (job_dir / "job.json").write_text(json.dumps(job), encoding="utf-8")
+    client = TestClient(create_app(str(runtime_dir), process_inspector=FakeProcessInspector({})))
+
+    response = client.get("/api/jobs/job-python/report")
+
+    assert response.status_code == 200
+    report = response.json()
+    assert report["collector"] == "py_spy"
+    assert "python_profile" in {section["section_id"] for section in report["sections"]}
 
 
 def _write_latency_job(

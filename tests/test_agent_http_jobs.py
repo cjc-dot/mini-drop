@@ -249,13 +249,17 @@ def test_server_job_client_skips_raw_perf_data_when_encoding_uploads(tmp_path: P
     perf_data.write_bytes(b"raw perf data")
     flamegraph = tmp_path / "flamegraph.svg"
     flamegraph.write_text("<svg></svg>", encoding="utf-8")
+    pyspy_profile = tmp_path / "py_spy_profile.json"
+    pyspy_profile.write_text('{"hotspots":[]}', encoding="utf-8")
 
     encoded = ServerJobClient._encode_uploadable_artifacts(
         {
             "perf_data": str(perf_data),
             "flamegraph": str(flamegraph),
+            "pyspy_profile": str(pyspy_profile),
         }
     )
 
     assert "perf_data" not in encoded
     assert encoded["flamegraph"] == base64.b64encode(b"<svg></svg>").decode("ascii")
+    assert encoded["pyspy_profile"] == base64.b64encode(b'{"hotspots":[]}').decode("ascii")

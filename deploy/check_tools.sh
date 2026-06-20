@@ -32,9 +32,11 @@ check_command gcc
 check_command python3
 check_command perf
 check_command bpftrace
+check_command py-spy
 
 check_nopasswd perf
 check_nopasswd bpftrace
+check_nopasswd py-spy
 
 if [ "$missing" -ne 0 ]; then
   echo

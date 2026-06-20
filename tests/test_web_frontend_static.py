@@ -25,6 +25,7 @@ def test_web_frontend_uses_existing_api_routes() -> None:
     assert "/artifacts/suggestions" in app_js
     assert "/artifacts/ebpf_syscalls" in app_js
     assert "/artifacts/ebpf_io_latency" in app_js
+    assert "/artifacts/pyspy_profile" in app_js
     assert "/compare/ebpf-io-latency" in app_js
     assert "/report" in app_js
     assert "collectorInput" in app_js
@@ -43,12 +44,15 @@ def test_web_frontend_contains_job_report_panel() -> None:
     assert 'id="ebpfLatencyChart"' in index
     assert 'id="ebpfLatencyBody"' in index
     assert 'id="ebpfDiffBody"' in index
+    assert 'id="pyspyBody"' in index
     assert 'id="diagnosisBody"' in index
     assert 'id="collectorInput"' in index
     assert "Rate/s" in index
     assert "Diagnosis Report" in index
     assert "eBPF IO Latency" in index
     assert "eBPF Baseline Diff" in index
+    assert "Python Profile" in index
+    assert "py-spy Python profile" in index
     assert 'data-report-job' in app_js
     assert "selectedJobId" in app_js
     assert "loadJobReport" in app_js
@@ -58,6 +62,7 @@ def test_web_frontend_contains_job_report_panel() -> None:
     assert "renderLatencyBar" in app_js
     assert "renderLatencyDiff" in app_js
     assert "renderDiagnosticReport" in app_js
+    assert "renderPyspyProfile" in app_js
     assert "formatSigned" in app_js
 
 
@@ -104,6 +109,8 @@ def test_artifact_route_serves_known_artifacts_inside_runtime(tmp_path: Path) ->
     ebpf_syscalls.write_text('{"events":[{"event":"read","count":1}]}', encoding="utf-8")
     ebpf_io_latency = profile_dir / "ebpf_io_latency.json"
     ebpf_io_latency.write_text('{"events":[{"event":"read","histogram":[]}]}', encoding="utf-8")
+    pyspy_profile = profile_dir / "py_spy_profile.json"
+    pyspy_profile.write_text('{"hotspots":[{"function":"hot_python_loop"}]}', encoding="utf-8")
     job = {
         "job_id": "job-1",
         "status": "DONE",
@@ -120,6 +127,7 @@ def test_artifact_route_serves_known_artifacts_inside_runtime(tmp_path: Path) ->
             "suggestions": str(suggestions),
             "ebpf_syscalls": str(ebpf_syscalls),
             "ebpf_io_latency": str(ebpf_io_latency),
+            "pyspy_profile": str(pyspy_profile),
         },
         "reason": "job completed successfully",
         "error_message": None,
@@ -134,6 +142,7 @@ def test_artifact_route_serves_known_artifacts_inside_runtime(tmp_path: Path) ->
     suggestions_response = client.get("/api/jobs/job-1/artifacts/suggestions")
     ebpf_response = client.get("/api/jobs/job-1/artifacts/ebpf_syscalls")
     ebpf_latency_response = client.get("/api/jobs/job-1/artifacts/ebpf_io_latency")
+    pyspy_response = client.get("/api/jobs/job-1/artifacts/pyspy_profile")
 
     assert response.status_code == 200
     assert response.text == "<svg>ok</svg>"
@@ -145,6 +154,8 @@ def test_artifact_route_serves_known_artifacts_inside_runtime(tmp_path: Path) ->
     assert ebpf_response.json() == {"events": [{"event": "read", "count": 1}]}
     assert ebpf_latency_response.status_code == 200
     assert ebpf_latency_response.json() == {"events": [{"event": "read", "histogram": []}]}
+    assert pyspy_response.status_code == 200
+    assert pyspy_response.json() == {"hotspots": [{"function": "hot_python_loop"}]}
 
 
 def test_artifact_route_rejects_file_outside_runtime(tmp_path: Path) -> None:
