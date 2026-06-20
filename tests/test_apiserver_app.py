@@ -72,11 +72,13 @@ def test_agent_claim_and_finish_job_over_http(tmp_path) -> None:
     assert claim["job"]["job_id"] == created["job_id"]
     assert claim["job"]["status"] == "RUNNING"
     assert claim["job"]["claimed_by"] == "local-agent"
+    lease_token = claim["job"]["lease_token"]
 
     finish_response = client.post(
         f"/api/agents/local-agent/jobs/{created['job_id']}/finish",
         json={
             "status": "DONE",
+            "lease_token": lease_token,
             "artifacts": {"flamegraph": str(tmp_path / "profiles" / created["job_id"] / "flamegraph.svg")},
         },
     )
@@ -108,12 +110,14 @@ def test_agent_uploads_artifacts_over_http_before_finish(tmp_path) -> None:
         "/api/jobs",
         json={"pid": 1234, "duration_seconds": 10, "sample_frequency": 99},
     ).json()
-    client.post("/api/agents/local-agent/jobs/claim", json={"max_pending_age_seconds": 300})
+    claimed = client.post("/api/agents/local-agent/jobs/claim", json={"max_pending_age_seconds": 300}).json()["job"]
+    lease_token = claimed["lease_token"]
 
     upload_response = client.post(
         f"/api/agents/local-agent/jobs/{created['job_id']}/artifacts",
         json={
             "encoding": "base64",
+            "lease_token": lease_token,
             "artifacts": {
                 "flamegraph": base64.b64encode(b"<svg>uploaded</svg>").decode("ascii"),
             },
@@ -128,10 +132,31 @@ def test_agent_uploads_artifacts_over_http_before_finish(tmp_path) -> None:
 
     finish_response = client.post(
         f"/api/agents/local-agent/jobs/{created['job_id']}/finish",
-        json={"status": "DONE"},
+        json={"status": "DONE", "lease_token": lease_token},
     )
 
     assert finish_response.status_code == 200
     assert finish_response.json()["artifacts"]["flamegraph"] == str(flamegraph)
     events = client.get(f"/api/jobs/{created['job_id']}/events").json()
     assert [event["status"] for event in events] == ["PENDING", "RUNNING", "UPLOADING", "DONE"]
+
+
+def test_agent_renews_claimed_job_lease_over_http(tmp_path) -> None:
+    client = TestClient(create_app(str(tmp_path), process_inspector=FakeProcessInspector({1234: {"pid": 1234}})))
+    created = client.post(
+        "/api/jobs",
+        json={"pid": 1234, "duration_seconds": 10, "sample_frequency": 99},
+    ).json()
+    claimed = client.post(
+        "/api/agents/local-agent/jobs/claim",
+        json={"max_pending_age_seconds": 300, "lease_seconds": 1},
+    ).json()["job"]
+
+    response = client.post(
+        f"/api/agents/local-agent/jobs/{created['job_id']}/lease",
+        json={"lease_token": claimed["lease_token"], "lease_seconds": 60},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "RUNNING"
+    assert response.json()["lease_expires_at"] > claimed["lease_expires_at"]

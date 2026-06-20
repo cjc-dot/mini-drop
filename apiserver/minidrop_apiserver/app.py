@@ -29,10 +29,17 @@ class AgentHeartbeatRequest(BaseModel):
 
 class ClaimJobRequest(BaseModel):
     max_pending_age_seconds: int | None = Field(default=300, ge=0)
+    lease_seconds: int = Field(default=60, gt=0)
+
+
+class RenewLeaseRequest(BaseModel):
+    lease_token: str = Field(min_length=1)
+    lease_seconds: int = Field(default=60, gt=0)
 
 
 class FinishJobRequest(BaseModel):
     status: Literal["DONE", "FAILED"]
+    lease_token: str | None = None
     artifacts: dict[str, str] | None = None
     error_message: str | None = None
     reason: str | None = None
@@ -40,6 +47,7 @@ class FinishJobRequest(BaseModel):
 
 class UploadArtifactsRequest(BaseModel):
     encoding: Literal["base64"] = "base64"
+    lease_token: str = Field(min_length=1)
     artifacts: dict[str, str] = Field(default_factory=dict)
 
 
@@ -137,7 +145,22 @@ def create_app(runtime_dir: str | None = None, process_inspector: ProcessInspect
         return store.claim_pending_job(
             agent_id=agent_id,
             max_pending_age_seconds=request.max_pending_age_seconds,
+            lease_seconds=request.lease_seconds,
         )
+
+    @app.post("/api/agents/{agent_id}/jobs/{job_id}/lease")
+    def renew_job_lease(agent_id: str, job_id: str, request: RenewLeaseRequest) -> dict:
+        try:
+            return store.renew_job_lease(
+                agent_id=agent_id,
+                job_id=job_id,
+                lease_token=request.lease_token,
+                lease_seconds=request.lease_seconds,
+            )
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="job not found") from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @app.post("/api/agents/{agent_id}/jobs/{job_id}/finish")
     def finish_job(agent_id: str, job_id: str, request: FinishJobRequest) -> dict:
@@ -149,6 +172,7 @@ def create_app(runtime_dir: str | None = None, process_inspector: ProcessInspect
                 artifacts=request.artifacts,
                 error_message=request.error_message,
                 reason=request.reason,
+                lease_token=request.lease_token,
             )
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail="job not found") from exc
@@ -164,6 +188,7 @@ def create_app(runtime_dir: str | None = None, process_inspector: ProcessInspect
                 agent_id=agent_id,
                 job_id=job_id,
                 artifact_payloads=request.artifacts,
+                lease_token=request.lease_token,
             )
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail="job not found") from exc

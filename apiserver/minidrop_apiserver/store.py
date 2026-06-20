@@ -5,7 +5,7 @@ import binascii
 from contextlib import contextmanager
 import json
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import time
 from uuid import uuid4
@@ -36,6 +36,7 @@ ARTIFACT_FILENAMES = {
 }
 
 MAX_ARTIFACT_BYTES = 20 * 1024 * 1024
+DEFAULT_LEASE_SECONDS = 60
 
 
 class ServerJobStore:
@@ -100,10 +101,13 @@ class ServerJobStore:
         self,
         agent_id: str,
         max_pending_age_seconds: int | None = 300,
+        lease_seconds: int = DEFAULT_LEASE_SECONDS,
     ) -> dict:
         skipped: list[dict] = []
         if not self.jobs_dir.exists():
             return {"job": None, "skipped": skipped}
+
+        skipped.extend(self.requeue_expired_leases())
 
         for job_id in self._pending_job_ids_oldest_first():
             with self._job_lock(job_id):
@@ -136,10 +140,77 @@ class ServerJobStore:
                     status="RUNNING",
                     reason=f"job claimed by {agent_id}",
                     expected_status="PENDING",
-                    extra={"claimed_by": agent_id, "claimed_at": self._now()},
+                    extra={
+                        "claimed_by": agent_id,
+                        "claimed_at": self._now(),
+                        "lease_token": uuid4().hex,
+                        "lease_expires_at": self._lease_deadline(lease_seconds),
+                    },
                 )
                 return {"job": claimed, "skipped": skipped}
         return {"job": None, "skipped": skipped}
+
+    def renew_job_lease(
+        self,
+        agent_id: str,
+        job_id: str,
+        lease_token: str,
+        lease_seconds: int = DEFAULT_LEASE_SECONDS,
+    ) -> dict:
+        with self._job_lock(job_id):
+            job = self.get_job(job_id)
+            if job is None:
+                raise FileNotFoundError(f"job not found: {job_id}")
+
+            self._validate_claim_owner(job, agent_id, lease_token)
+            if job.get("status") not in {"RUNNING", "UPLOADING"}:
+                raise InvalidJobTransition(f"cannot renew lease for {job_id} from {job.get('status')}")
+
+            renewed = dict(job)
+            renewed["lease_expires_at"] = self._lease_deadline(lease_seconds)
+            renewed["updated_at"] = self._now()
+            self._write_json_atomic(self._job_file(job_id), renewed)
+            return renewed
+
+    def requeue_expired_leases(self) -> list[dict]:
+        skipped: list[dict] = []
+        if not self.jobs_dir.exists():
+            return skipped
+
+        for job_file in self.jobs_dir.glob("*/job.json"):
+            job_id = job_file.parent.name
+            with self._job_lock(job_id):
+                job = self.get_job(job_id)
+                if job is None or job.get("status") not in {"RUNNING", "UPLOADING"}:
+                    continue
+                lease_expires_at = job.get("lease_expires_at")
+                if not lease_expires_at or not self._is_time_expired(lease_expires_at):
+                    continue
+
+                reason = "job lease expired before completion"
+                requeued = self._transition_job_locked(
+                    job=job,
+                    status="PENDING",
+                    reason=reason,
+                    artifacts={},
+                    expected_status=("RUNNING", "UPLOADING"),
+                    extra={
+                        "claimed_by": None,
+                        "claimed_at": None,
+                        "lease_token": None,
+                        "lease_expires_at": None,
+                        "previous_claimed_by": job.get("claimed_by"),
+                    },
+                )
+                skipped.append(
+                    {
+                        "job_id": job_id,
+                        "reason": reason,
+                        "error_message": f"lease expired at {lease_expires_at}",
+                        "status": requeued["status"],
+                    }
+                )
+        return skipped
 
     def finish_claimed_job(
         self,
@@ -149,6 +220,7 @@ class ServerJobStore:
         artifacts: dict[str, str] | None = None,
         error_message: str | None = None,
         reason: str | None = None,
+        lease_token: str | None = None,
     ) -> dict:
         if status not in {"DONE", "FAILED"}:
             raise ValueError(f"unsupported finish status: {status}")
@@ -158,9 +230,7 @@ class ServerJobStore:
             if job is None:
                 raise FileNotFoundError(f"job not found: {job_id}")
 
-            claimed_by = job.get("claimed_by")
-            if claimed_by is not None and claimed_by != agent_id:
-                raise InvalidJobTransition(f"job {job_id} was claimed by {claimed_by}, not {agent_id}")
+            self._validate_claim_owner(job, agent_id, lease_token)
 
             if status == "FAILED":
                 return self._transition_job_locked(
@@ -169,7 +239,8 @@ class ServerJobStore:
                     reason=reason or "collector failed",
                     artifacts=artifacts,
                     error_message=error_message,
-                    expected_status="RUNNING",
+                    expected_status=("RUNNING", "UPLOADING"),
+                    extra={"lease_token": None, "lease_expires_at": None},
                 )
 
             if job.get("status") == "RUNNING":
@@ -194,6 +265,7 @@ class ServerJobStore:
                 reason=reason or "job completed successfully",
                 artifacts=uploading.get("artifacts", {}),
                 expected_status="UPLOADING",
+                extra={"lease_token": None, "lease_expires_at": None},
             )
 
     def upload_artifacts(
@@ -201,6 +273,7 @@ class ServerJobStore:
         agent_id: str,
         job_id: str,
         artifact_payloads: dict[str, str],
+        lease_token: str | None = None,
     ) -> dict:
         if not artifact_payloads:
             raise ArtifactUploadError("no artifacts provided")
@@ -210,9 +283,7 @@ class ServerJobStore:
             if job is None:
                 raise FileNotFoundError(f"job not found: {job_id}")
 
-            claimed_by = job.get("claimed_by")
-            if claimed_by is not None and claimed_by != agent_id:
-                raise InvalidJobTransition(f"job {job_id} was claimed by {claimed_by}, not {agent_id}")
+            self._validate_claim_owner(job, agent_id, lease_token)
 
             current_status = job.get("status")
             if current_status not in {"RUNNING", "UPLOADING"}:
@@ -306,6 +377,17 @@ class ServerJobStore:
             pending_jobs.append((str(job.get("created_at", "")), job_file.parent.name))
         return [job_id for _, job_id in sorted(pending_jobs)]
 
+    @staticmethod
+    def _validate_claim_owner(job: dict, agent_id: str, lease_token: str | None) -> None:
+        job_id = str(job["job_id"])
+        claimed_by = job.get("claimed_by")
+        if claimed_by != agent_id:
+            raise InvalidJobTransition(f"job {job_id} was claimed by {claimed_by}, not {agent_id}")
+
+        expected_token = job.get("lease_token")
+        if not expected_token or lease_token != expected_token:
+            raise InvalidJobTransition(f"job {job_id} lease token mismatch")
+
     @contextmanager
     def _job_lock(self, job_id: str):
         lock_file = self._job_dir(job_id) / "job.lock"
@@ -349,6 +431,20 @@ class ServerJobStore:
             created = created.replace(tzinfo=timezone.utc)
         age_seconds = (datetime.now(timezone.utc) - created).total_seconds()
         return age_seconds > max_pending_age_seconds
+
+    @staticmethod
+    def _is_time_expired(value: str) -> bool:
+        try:
+            deadline = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except ValueError:
+            return False
+        if deadline.tzinfo is None:
+            deadline = deadline.replace(tzinfo=timezone.utc)
+        return datetime.now(timezone.utc) > deadline
+
+    @staticmethod
+    def _lease_deadline(lease_seconds: int) -> str:
+        return (datetime.now(timezone.utc) + timedelta(seconds=lease_seconds)).isoformat()
 
     def _job_dir(self, job_id: str) -> Path:
         return self.jobs_dir / job_id

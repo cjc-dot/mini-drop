@@ -55,12 +55,14 @@ def test_claim_pending_job_marks_job_running_and_records_agent(tmp_path: Path) -
     store = ServerJobStore(str(tmp_path))
     pending = store.create_job(pid=1234, duration_seconds=10, sample_frequency=99)
 
-    claim = store.claim_pending_job(agent_id="agent-1")
+    claim = store.claim_pending_job(agent_id="agent-1", lease_seconds=60)
 
     assert claim["skipped"] == []
     assert claim["job"]["job_id"] == pending["job_id"]
     assert claim["job"]["status"] == "RUNNING"
     assert claim["job"]["claimed_by"] == "agent-1"
+    assert claim["job"]["lease_token"]
+    assert claim["job"]["lease_expires_at"] is not None
     assert store.get_job(pending["job_id"])["status"] == "RUNNING"
     assert [event["status"] for event in store.get_events(pending["job_id"])] == ["PENDING", "RUNNING"]
 
@@ -93,17 +95,20 @@ def test_claim_pending_job_marks_stale_job_failed_and_claims_next(tmp_path: Path
 def test_finish_claimed_job_records_uploading_and_done_events(tmp_path: Path) -> None:
     store = ServerJobStore(str(tmp_path))
     pending = store.create_job(pid=1234, duration_seconds=10, sample_frequency=99)
-    store.claim_pending_job(agent_id="agent-1")
+    claimed = store.claim_pending_job(agent_id="agent-1")["job"]
 
     done = store.finish_claimed_job(
         agent_id="agent-1",
         job_id=pending["job_id"],
         status="DONE",
+        lease_token=claimed["lease_token"],
         artifacts={"flamegraph": "/tmp/flamegraph.svg"},
     )
 
     assert done["status"] == "DONE"
     assert done["artifacts"] == {"flamegraph": "/tmp/flamegraph.svg"}
+    assert done["lease_token"] is None
+    assert done["lease_expires_at"] is None
     assert [event["status"] for event in store.get_events(pending["job_id"])] == [
         "PENDING",
         "RUNNING",
@@ -115,10 +120,15 @@ def test_finish_claimed_job_records_uploading_and_done_events(tmp_path: Path) ->
 def test_finish_claimed_job_rejects_other_agent(tmp_path: Path) -> None:
     store = ServerJobStore(str(tmp_path))
     pending = store.create_job(pid=1234, duration_seconds=10, sample_frequency=99)
-    store.claim_pending_job(agent_id="agent-1")
+    claimed = store.claim_pending_job(agent_id="agent-1")["job"]
 
     try:
-        store.finish_claimed_job(agent_id="agent-2", job_id=pending["job_id"], status="DONE")
+        store.finish_claimed_job(
+            agent_id="agent-2",
+            job_id=pending["job_id"],
+            status="DONE",
+            lease_token=claimed["lease_token"],
+        )
     except InvalidJobTransition:
         pass
     else:
@@ -128,11 +138,12 @@ def test_finish_claimed_job_rejects_other_agent(tmp_path: Path) -> None:
 def test_upload_artifacts_writes_files_inside_server_runtime(tmp_path: Path) -> None:
     store = ServerJobStore(str(tmp_path))
     pending = store.create_job(pid=1234, duration_seconds=10, sample_frequency=99)
-    store.claim_pending_job(agent_id="agent-1")
+    claimed = store.claim_pending_job(agent_id="agent-1")["job"]
 
     uploaded = store.upload_artifacts(
         agent_id="agent-1",
         job_id=pending["job_id"],
+        lease_token=claimed["lease_token"],
         artifact_payloads={
             "flamegraph": base64.b64encode(b"<svg>server copy</svg>").decode("ascii"),
             "hotspots": base64.b64encode(b'{"hotspots": []}').decode("ascii"),
@@ -147,7 +158,12 @@ def test_upload_artifacts_writes_files_inside_server_runtime(tmp_path: Path) -> 
     assert uploaded["artifacts"]["flamegraph"] == str(flamegraph)
     assert uploaded["artifacts"]["hotspots"] == str(hotspots)
 
-    done = store.finish_claimed_job(agent_id="agent-1", job_id=pending["job_id"], status="DONE")
+    done = store.finish_claimed_job(
+        agent_id="agent-1",
+        job_id=pending["job_id"],
+        status="DONE",
+        lease_token=claimed["lease_token"],
+    )
 
     assert done["status"] == "DONE"
     assert done["artifacts"]["flamegraph"] == str(flamegraph)
@@ -162,15 +178,106 @@ def test_upload_artifacts_writes_files_inside_server_runtime(tmp_path: Path) -> 
 def test_upload_artifacts_rejects_unknown_artifact_name(tmp_path: Path) -> None:
     store = ServerJobStore(str(tmp_path))
     pending = store.create_job(pid=1234, duration_seconds=10, sample_frequency=99)
-    store.claim_pending_job(agent_id="agent-1")
+    claimed = store.claim_pending_job(agent_id="agent-1")["job"]
 
     try:
         store.upload_artifacts(
             agent_id="agent-1",
             job_id=pending["job_id"],
+            lease_token=claimed["lease_token"],
             artifact_payloads={"../../bad": base64.b64encode(b"bad").decode("ascii")},
         )
     except RuntimeError:
         pass
     else:
         raise AssertionError("upload_artifacts should reject unknown artifact names")
+
+
+def test_renew_job_lease_extends_running_job_deadline(tmp_path: Path) -> None:
+    store = ServerJobStore(str(tmp_path))
+    pending = store.create_job(pid=1234, duration_seconds=10, sample_frequency=99)
+    claimed = store.claim_pending_job(agent_id="agent-1", lease_seconds=1)["job"]
+
+    renewed = store.renew_job_lease(
+        agent_id="agent-1",
+        job_id=pending["job_id"],
+        lease_token=claimed["lease_token"],
+        lease_seconds=60,
+    )
+
+    assert renewed["status"] == "RUNNING"
+    assert renewed["claimed_by"] == "agent-1"
+    assert renewed["lease_expires_at"] > claimed["lease_expires_at"]
+
+
+def test_requeue_expired_leases_moves_running_job_back_to_pending(tmp_path: Path) -> None:
+    store = ServerJobStore(str(tmp_path))
+    pending = store.create_job(pid=1234, duration_seconds=10, sample_frequency=99)
+    claimed = store.claim_pending_job(agent_id="agent-1", lease_seconds=60)["job"]
+    claimed["lease_expires_at"] = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
+    store._write_json_atomic(tmp_path / "jobs" / pending["job_id"] / "job.json", claimed)
+
+    skipped = store.requeue_expired_leases()
+
+    assert skipped == [
+        {
+            "job_id": pending["job_id"],
+            "reason": "job lease expired before completion",
+            "error_message": f"lease expired at {claimed['lease_expires_at']}",
+            "status": "PENDING",
+        }
+    ]
+    job = store.get_job(pending["job_id"])
+    assert job["status"] == "PENDING"
+    assert job["artifacts"] == {}
+    assert job["claimed_by"] is None
+    assert job["lease_token"] is None
+    assert job["lease_expires_at"] is None
+    assert job["previous_claimed_by"] == "agent-1"
+    assert [event["status"] for event in store.get_events(pending["job_id"])] == ["PENDING", "RUNNING", "PENDING"]
+
+
+def test_claim_pending_job_requeues_expired_lease_before_claiming_next_job(tmp_path: Path) -> None:
+    store = ServerJobStore(str(tmp_path))
+    first = store.create_job(pid=1001, duration_seconds=10, sample_frequency=99)
+    second = store.create_job(pid=1002, duration_seconds=10, sample_frequency=99)
+    first_claimed = store.claim_pending_job(agent_id="agent-1", lease_seconds=60)["job"]
+    first_claimed["lease_expires_at"] = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
+    store._write_json_atomic(tmp_path / "jobs" / first["job_id"] / "job.json", first_claimed)
+
+    claim = store.claim_pending_job(agent_id="agent-2", lease_seconds=60)
+
+    assert claim["job"]["job_id"] == first["job_id"]
+    assert claim["job"]["claimed_by"] == "agent-2"
+    assert claim["skipped"][0]["reason"] == "job lease expired before completion"
+    assert store.get_job(second["job_id"])["status"] == "PENDING"
+
+
+def test_stale_lease_token_cannot_finish_reclaimed_job(tmp_path: Path) -> None:
+    store = ServerJobStore(str(tmp_path))
+    pending = store.create_job(pid=1234, duration_seconds=10, sample_frequency=99)
+    first_claim = store.claim_pending_job(agent_id="agent-1", lease_seconds=60)["job"]
+    first_claim["lease_expires_at"] = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
+    store._write_json_atomic(tmp_path / "jobs" / pending["job_id"] / "job.json", first_claim)
+
+    second_claim = store.claim_pending_job(agent_id="agent-2", lease_seconds=60)["job"]
+
+    try:
+        store.finish_claimed_job(
+            agent_id="agent-1",
+            job_id=pending["job_id"],
+            status="DONE",
+            lease_token=first_claim["lease_token"],
+        )
+    except InvalidJobTransition:
+        pass
+    else:
+        raise AssertionError("old lease owner should not be allowed to finish a reclaimed job")
+
+    done = store.finish_claimed_job(
+        agent_id="agent-2",
+        job_id=pending["job_id"],
+        status="DONE",
+        lease_token=second_claim["lease_token"],
+    )
+    assert done["status"] == "DONE"

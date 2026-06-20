@@ -64,6 +64,7 @@ def build_parser() -> argparse.ArgumentParser:
     daemon.add_argument("--disable-pid-check", action="store_true")
     daemon.add_argument("--version", default="0.1.0")
     daemon.add_argument("--job-source", default="local", choices=["local", "server"])
+    daemon.add_argument("--lease-seconds", default=60, type=_positive_int)
 
     return parser
 
@@ -120,6 +121,7 @@ def main(argv: list[str] | None = None) -> int:
                 runtime_dir=args.runtime_dir,
                 server_url=args.server_url,
                 agent_id=args.agent_id,
+                lease_seconds=args.lease_seconds,
             )
         daemon = AgentDaemon(
             runtime_dir=args.runtime_dir,
