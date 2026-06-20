@@ -149,15 +149,16 @@ function renderSuggestions(report) {
   suggestionsBody.innerHTML = findings.map((finding) => {
     const evidence = finding.evidence || {};
     const actions = Array.isArray(finding.next_actions) ? finding.next_actions : [];
+    const evidenceText = formatFindingEvidence(evidence);
     return `
       <article class="suggestion">
         <div class="suggestion-head">
           <span class="badge ${escapeHtml(String(finding.severity || "INFO").toLowerCase())}">${escapeHtml(finding.severity || "INFO")}</span>
           <strong>${escapeHtml(finding.title || finding.rule_id || "Suggestion")}</strong>
         </div>
-        <p class="mono">${escapeHtml(finding.function || "-")}</p>
+        <p class="mono">${escapeHtml(finding.function || finding.target || "-")}</p>
         <p>${escapeHtml(finding.reason || finding.matched_condition || "")}</p>
-        <p>Self ${escapeHtml(evidence.self_percent ?? 0)}%, inclusive ${escapeHtml(evidence.inclusive_percent ?? 0)}%.</p>
+        ${evidenceText ? `<p>${escapeHtml(evidenceText)}</p>` : ""}
         <p>${escapeHtml(finding.advice || "")}</p>
         ${actions.length ? `<ol>${actions.map((action) => `<li>${escapeHtml(action)}</li>`).join("")}</ol>` : ""}
       </article>
@@ -165,11 +166,25 @@ function renderSuggestions(report) {
   }).join("");
 }
 
+function formatFindingEvidence(evidence) {
+  if (evidence.self_percent !== undefined || evidence.inclusive_percent !== undefined) {
+    return `Self ${evidence.self_percent ?? 0}%, inclusive ${evidence.inclusive_percent ?? 0}%.`;
+  }
+  const parts = [];
+  if (evidence.count !== undefined) parts.push(`count ${evidence.count}`);
+  if (evidence.rate_per_second !== undefined) parts.push(`rate ${evidence.rate_per_second}/s`);
+  if (evidence.read_per_second !== undefined) parts.push(`read ${evidence.read_per_second}/s`);
+  if (evidence.write_per_second !== undefined) parts.push(`write ${evidence.write_per_second}/s`);
+  return parts.join(", ");
+}
+
 function renderEbpfSyscalls(report) {
   const events = report && Array.isArray(report.events) ? report.events : [];
-  ebpfSummary.textContent = report ? `${report.total_events || 0} event(s)` : "not available";
+  ebpfSummary.textContent = report
+    ? `${report.total_events || 0} event(s) · ${report.duration_seconds || "-"}s`
+    : "not available";
   if (events.length === 0) {
-    ebpfBody.innerHTML = `<tr><td colspan="2" class="empty">No eBPF syscall data</td></tr>`;
+    ebpfBody.innerHTML = `<tr><td colspan="3" class="empty">No eBPF syscall data</td></tr>`;
     return;
   }
 
@@ -177,6 +192,7 @@ function renderEbpfSyscalls(report) {
     <tr>
       <td class="mono">${escapeHtml(event.event || "-")}</td>
       <td>${escapeHtml(event.count ?? 0)}</td>
+      <td>${escapeHtml(event.rate_per_second ?? 0)}</td>
     </tr>
   `).join("");
 }
@@ -194,7 +210,7 @@ async function loadJobReport(jobId, options = {}) {
   flamegraphFrame.removeAttribute("src");
   flamegraphOpenLink.classList.add("hidden");
   hotspotsBody.innerHTML = `<tr><td colspan="5" class="empty">Loading...</td></tr>`;
-  ebpfBody.innerHTML = `<tr><td colspan="2" class="empty">Loading...</td></tr>`;
+  ebpfBody.innerHTML = `<tr><td colspan="3" class="empty">Loading...</td></tr>`;
   suggestionsBody.innerHTML = `<p class="empty">Loading...</p>`;
 
   try {

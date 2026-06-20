@@ -38,9 +38,11 @@ def test_web_frontend_contains_job_report_panel() -> None:
     assert 'id="suggestionsBody"' in index
     assert 'id="ebpfBody"' in index
     assert 'id="collectorInput"' in index
+    assert "Rate/s" in index
     assert 'data-report-job' in app_js
     assert "selectedJobId" in app_js
     assert "loadJobReport" in app_js
+    assert "formatFindingEvidence" in app_js
 
 
 def test_web_ui_route_serves_index(tmp_path: Path) -> None:
