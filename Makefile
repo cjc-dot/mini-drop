@@ -25,7 +25,7 @@ BASELINE ?=
 CURRENT ?=
 DIFF_OUTPUT ?= $(MINIDROP_RUNTIME)/profiles/ebpf-latency-diff.json
 
-.PHONY: init check-tools setup-sudoers build-workload build-io-workload build-latency-workload collect latency-diff agent-run agent-run-pending agent-heartbeat agent-daemon api-run api-maintenance test clean-runtime demo e2e-demo agent-demo python-demo
+.PHONY: init check-tools setup-sudoers build-workload build-io-workload build-latency-workload collect latency-diff agent-run agent-run-pending agent-heartbeat agent-daemon api-run api-maintenance test integration-test clean-runtime demo e2e-demo agent-demo python-demo
 
 init:
 	mkdir -p $(MINIDROP_RUNTIME)/builds
@@ -164,6 +164,9 @@ python-demo: init
 
 test:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m pytest tests
+
+integration-test:
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m pytest tests/test_e2e_flows.py
 
 clean-runtime:
 	rm -rf $(MINIDROP_RUNTIME)/profiles/demo
