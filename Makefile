@@ -25,7 +25,7 @@ BASELINE ?=
 CURRENT ?=
 DIFF_OUTPUT ?= $(MINIDROP_RUNTIME)/profiles/ebpf-latency-diff.json
 
-.PHONY: init check-tools setup-sudoers build-workload build-io-workload build-latency-workload collect latency-diff agent-run agent-run-pending agent-heartbeat agent-daemon api-run api-maintenance test clean-runtime demo agent-demo python-demo
+.PHONY: init check-tools setup-sudoers build-workload build-io-workload build-latency-workload collect latency-diff agent-run agent-run-pending agent-heartbeat agent-daemon api-run api-maintenance test clean-runtime demo e2e-demo agent-demo python-demo
 
 init:
 	mkdir -p $(MINIDROP_RUNTIME)/builds
@@ -129,6 +129,20 @@ demo: build-workload
 	trap 'kill $$pid >/dev/null 2>&1 || true' EXIT; \
 	sleep 1; \
 	$(MAKE) collect PID=$$pid PROFILE_ID=demo DURATION=$(DURATION) FREQUENCY=$(FREQUENCY)
+
+e2e-demo: build-workload
+	MINIDROP_RUNTIME=$(MINIDROP_RUNTIME) \
+	PYTHON=$(PYTHON) \
+	PYTHONPATH=$(PYTHONPATH) \
+	API_HOST=$(API_HOST) \
+	API_PORT=$(API_PORT) \
+	DURATION=$(DURATION) \
+	FREQUENCY=$(FREQUENCY) \
+	COLLECTOR=$(COLLECTOR) \
+	AGENT_ID=$(AGENT_ID) \
+	POLL_INTERVAL=$(POLL_INTERVAL) \
+	LEASE_SECONDS=$(LEASE_SECONDS) \
+	bash scripts/e2e_demo.sh
 
 agent-demo: build-workload
 	@set -euo pipefail; \
