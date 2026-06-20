@@ -242,6 +242,21 @@ tr.selected-row .link-button {
   color: #1c4ed8;
 }
 
+.badge.regressed {
+  background: #ffe3e3;
+  color: var(--red);
+}
+
+.badge.improved {
+  background: #d3f9d8;
+  color: var(--green);
+}
+
+.badge.similar {
+  background: #edf2ff;
+  color: #1c4ed8;
+}
+
 .empty {
   color: var(--muted);
   text-align: center;
@@ -421,6 +436,57 @@ a {
   background: var(--green);
 }
 
+.diff-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.diff-card {
+  border: 1px solid #e6ebf3;
+  border-radius: 6px;
+  padding: 12px;
+  background: #fbfdff;
+}
+
+.diff-card.regressed {
+  border-color: #ffc9c9;
+}
+
+.diff-card.improved {
+  border-color: #b2f2bb;
+}
+
+.diff-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.diff-card-head strong {
+  font-family: Consolas, Monaco, monospace;
+}
+
+.diff-card dl {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+}
+
+.diff-card dt {
+  color: var(--muted);
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+
+.diff-card dd {
+  margin: 0;
+  font-family: Consolas, Monaco, monospace;
+  overflow-wrap: anywhere;
+}
+
 .suggestions {
   display: grid;
   gap: 12px;
@@ -504,5 +570,9 @@ a {
   .latency-value {
     grid-column: 2;
     text-align: left;
+  }
+
+  .diff-card dl {
+    grid-template-columns: 1fr;
   }
 }

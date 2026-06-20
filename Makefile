@@ -21,8 +21,11 @@ MAX_CLAIM_ATTEMPTS ?= 3
 DISABLE_PID_CHECK ?= 0
 JOB_SOURCE ?= server
 LEASE_SECONDS ?= 60
+BASELINE ?=
+CURRENT ?=
+DIFF_OUTPUT ?= $(MINIDROP_RUNTIME)/profiles/ebpf-latency-diff.json
 
-.PHONY: init check-tools setup-sudoers build-workload build-io-workload build-latency-workload collect agent-run agent-run-pending agent-heartbeat agent-daemon api-run api-maintenance test clean-runtime demo agent-demo
+.PHONY: init check-tools setup-sudoers build-workload build-io-workload build-latency-workload collect latency-diff agent-run agent-run-pending agent-heartbeat agent-daemon api-run api-maintenance test clean-runtime demo agent-demo
 
 init:
 	mkdir -p $(MINIDROP_RUNTIME)/builds
@@ -62,6 +65,13 @@ collect:
 		--frequency $(FREQUENCY) \
 		--collector $(COLLECTOR) \
 		--output $(MINIDROP_RUNTIME)/profiles/$(PROFILE_ID)
+
+latency-diff:
+	@if [ -z "$(BASELINE)" ] || [ -z "$(CURRENT)" ]; then echo "Usage: make latency-diff BASELINE=<baseline-json> CURRENT=<current-json> [DIFF_OUTPUT=path]"; exit 2; fi
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m minidrop_analysis compare-latency \
+		--baseline $(BASELINE) \
+		--current $(CURRENT) \
+		--output $(DIFF_OUTPUT)
 
 agent-run:
 	@if [ -z "$(PID)" ]; then echo "Usage: make agent-run PID=<target-pid> [DURATION=10] [FREQUENCY=99] [JOB_ID=name]"; exit 2; fi

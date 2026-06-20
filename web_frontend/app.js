@@ -22,6 +22,8 @@ const ebpfBody = document.querySelector("#ebpfBody");
 const ebpfLatencySummary = document.querySelector("#ebpfLatencySummary");
 const ebpfLatencyBody = document.querySelector("#ebpfLatencyBody");
 const ebpfLatencyChart = document.querySelector("#ebpfLatencyChart");
+const ebpfDiffSummary = document.querySelector("#ebpfDiffSummary");
+const ebpfDiffBody = document.querySelector("#ebpfDiffBody");
 let selectedJobId = null;
 
 async function fetchJson(url, options) {
@@ -188,7 +190,7 @@ function formatFindingEvidence(evidence) {
 function renderEbpfSyscalls(report) {
   const events = report && Array.isArray(report.events) ? report.events : [];
   ebpfSummary.textContent = report
-    ? `${report.total_events || 0} event(s) · ${report.duration_seconds || "-"}s`
+    ? `${report.total_events || 0} event(s) / ${report.duration_seconds || "-"}s`
     : "not available";
   if (events.length === 0) {
     ebpfBody.innerHTML = `<tr><td colspan="3" class="empty">No eBPF syscall data</td></tr>`;
@@ -207,7 +209,7 @@ function renderEbpfSyscalls(report) {
 function renderEbpfLatency(report) {
   const events = report && Array.isArray(report.events) ? report.events : [];
   ebpfLatencySummary.textContent = report
-    ? `${report.total_events || 0} event(s) · ${report.duration_seconds || "-"}s`
+    ? `${report.total_events || 0} event(s) / ${report.duration_seconds || "-"}s`
     : "not available";
   if (events.length === 0) {
     ebpfLatencyChart.innerHTML = `<p class="empty">No eBPF IO latency data</p>`;
@@ -249,7 +251,7 @@ function renderLatencyChart(events) {
       <div class="latency-group">
         <div class="latency-group-title">
           <strong>${escapeHtml(event.event || "-")}</strong>
-          <span>p50 ${escapeHtml(event.p50_bucket || "-")} · p99 ${escapeHtml(event.p99_bucket || "-")}</span>
+          <span>p50 ${escapeHtml(event.p50_bucket || "-")} / p99 ${escapeHtml(event.p99_bucket || "-")}</span>
         </div>
         <div class="latency-bars">
           ${histogram.map((bucket) => renderLatencyBar(bucket, maxCount, eventName)).join("")}
@@ -274,6 +276,53 @@ function renderLatencyBar(bucket, maxCount, eventName) {
   `;
 }
 
+function renderLatencyDiff(report) {
+  if (!report || report.comparison_available === false) {
+    ebpfDiffSummary.textContent = report ? "no baseline" : "not available";
+    ebpfDiffBody.innerHTML = `<p class="empty">${escapeHtml(report?.reason || "No eBPF latency diff data")}</p>`;
+    return;
+  }
+
+  const events = Array.isArray(report.events) ? report.events : [];
+  ebpfDiffSummary.textContent = `baseline ${report.baseline_job_id || "-"} / ${report.finding_count || 0} finding(s)`;
+  if (events.length === 0) {
+    ebpfDiffBody.innerHTML = `<p class="empty">No comparable latency events</p>`;
+    return;
+  }
+
+  ebpfDiffBody.innerHTML = events.map((event) => {
+    const verdict = event.verdict || "similar";
+    const tailDelta = Number(event.tail_1ms_percent_delta || 0);
+    return `
+      <article class="diff-card ${escapeHtml(verdict)}">
+        <div class="diff-card-head">
+          <strong>${escapeHtml(event.event || "-")}</strong>
+          <span class="badge ${escapeHtml(verdict)}">${escapeHtml(verdict)}</span>
+        </div>
+        <dl>
+          <div>
+            <dt>tail >=1ms</dt>
+            <dd>${escapeHtml(event.baseline_tail_1ms_percent ?? 0)}% -> ${escapeHtml(event.current_tail_1ms_percent ?? 0)}% (${formatSigned(tailDelta)} pts)</dd>
+          </div>
+          <div>
+            <dt>p99</dt>
+            <dd>${escapeHtml(event.baseline_p99_bucket || "-")} -> ${escapeHtml(event.current_p99_bucket || "-")}</dd>
+          </div>
+          <div>
+            <dt>samples</dt>
+            <dd>${escapeHtml(event.baseline_total_count ?? 0)} -> ${escapeHtml(event.current_total_count ?? 0)}</dd>
+          </div>
+        </dl>
+      </article>
+    `;
+  }).join("");
+}
+
+function formatSigned(value) {
+  if (value > 0) return `+${value}`;
+  return String(value);
+}
+
 async function loadJobReport(jobId, options = {}) {
   selectedJobId = jobId;
   document.querySelectorAll("#jobsBody tr").forEach((row) => row.classList.remove("selected-row"));
@@ -290,20 +339,23 @@ async function loadJobReport(jobId, options = {}) {
   ebpfBody.innerHTML = `<tr><td colspan="3" class="empty">Loading...</td></tr>`;
   ebpfLatencyChart.innerHTML = `<p class="empty">Loading...</p>`;
   ebpfLatencyBody.innerHTML = `<tr><td colspan="4" class="empty">Loading...</td></tr>`;
+  ebpfDiffSummary.textContent = "";
+  ebpfDiffBody.innerHTML = `<p class="empty">Loading...</p>`;
   suggestionsBody.innerHTML = `<p class="empty">Loading...</p>`;
 
   try {
     const job = await fetchJson(`/api/jobs/${encodeURIComponent(jobId)}`);
     const artifacts = job.artifacts || {};
-    const [hotspots, suggestions, ebpfSyscalls, ebpfLatency] = await Promise.all([
+    const [hotspots, suggestions, ebpfSyscalls, ebpfLatency, ebpfLatencyDiff] = await Promise.all([
       artifacts.hotspots ? fetchJson(`/api/jobs/${encodeURIComponent(jobId)}/artifacts/hotspots`) : Promise.resolve(null),
       artifacts.suggestions ? fetchJson(`/api/jobs/${encodeURIComponent(jobId)}/artifacts/suggestions`) : Promise.resolve(null),
       artifacts.ebpf_syscalls ? fetchJson(`/api/jobs/${encodeURIComponent(jobId)}/artifacts/ebpf_syscalls`) : Promise.resolve(null),
       artifacts.ebpf_io_latency ? fetchJson(`/api/jobs/${encodeURIComponent(jobId)}/artifacts/ebpf_io_latency`) : Promise.resolve(null),
+      artifacts.ebpf_io_latency ? fetchJson(`/api/jobs/${encodeURIComponent(jobId)}/compare/ebpf-io-latency`) : Promise.resolve(null),
     ]);
 
     renderReportMeta(job);
-    jobReportSubtitle.textContent = `${job.status || "UNKNOWN"} · PID ${(job.spec || {}).pid || "-"}`;
+    jobReportSubtitle.textContent = `${job.status || "UNKNOWN"} / PID ${(job.spec || {}).pid || "-"}`;
     if (artifacts.flamegraph) {
       const flamegraphUrl = `/api/jobs/${encodeURIComponent(jobId)}/artifacts/flamegraph`;
       flamegraphFrame.src = flamegraphUrl;
@@ -313,6 +365,7 @@ async function loadJobReport(jobId, options = {}) {
     renderHotspots(hotspots);
     renderEbpfSyscalls(ebpfSyscalls);
     renderEbpfLatency(ebpfLatency);
+    renderLatencyDiff(ebpfLatencyDiff);
     renderSuggestions(suggestions);
     jobReportStatus.textContent = job.status === "DONE" ? "Analysis ready" : "Artifacts may be incomplete";
     if (options.scroll && window.matchMedia("(max-width: 1180px)").matches) {

@@ -225,3 +225,112 @@ def test_maintenance_endpoint_requeues_expired_running_jobs(tmp_path) -> None:
     job = client.get(f"/api/jobs/{created['job_id']}").json()
     assert job["status"] == "PENDING"
     assert job["previous_claimed_by"] == "crash-agent"
+
+
+def test_compare_ebpf_io_latency_uses_previous_done_job_as_baseline(tmp_path) -> None:
+    runtime_dir = tmp_path / "runtime"
+    _write_latency_job(
+        runtime_dir=runtime_dir,
+        job_id="job-base",
+        created_at="2026-06-20T00:00:00+00:00",
+        tail_1ms_percent=1.0,
+        p99_bucket="10-100",
+    )
+    _write_latency_job(
+        runtime_dir=runtime_dir,
+        job_id="job-current",
+        created_at="2026-06-20T00:01:00+00:00",
+        tail_1ms_percent=25.0,
+        p99_bucket="1000-10000",
+    )
+    client = TestClient(create_app(str(runtime_dir), process_inspector=FakeProcessInspector({})))
+
+    response = client.get("/api/jobs/job-current/compare/ebpf-io-latency")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["comparison_available"] is True
+    assert payload["baseline_job_id"] == "job-base"
+    assert payload["current_job_id"] == "job-current"
+    assert payload["events"][0]["verdict"] == "regressed"
+    assert payload["finding_count"] == 1
+
+
+def test_compare_ebpf_io_latency_returns_no_baseline_report(tmp_path) -> None:
+    runtime_dir = tmp_path / "runtime"
+    _write_latency_job(
+        runtime_dir=runtime_dir,
+        job_id="job-current",
+        created_at="2026-06-20T00:01:00+00:00",
+        tail_1ms_percent=25.0,
+        p99_bucket="1000-10000",
+    )
+    client = TestClient(create_app(str(runtime_dir), process_inspector=FakeProcessInspector({})))
+
+    response = client.get("/api/jobs/job-current/compare/ebpf-io-latency")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["comparison_available"] is False
+    assert payload["reason"] == "no previous ebpf_io_latency baseline job found"
+
+
+def _write_latency_job(
+    runtime_dir: Path,
+    job_id: str,
+    created_at: str,
+    tail_1ms_percent: float,
+    p99_bucket: str,
+) -> None:
+    profile_dir = runtime_dir / "profiles" / job_id
+    job_dir = runtime_dir / "jobs" / job_id
+    profile_dir.mkdir(parents=True)
+    job_dir.mkdir(parents=True)
+    latency_file = profile_dir / "ebpf_io_latency.json"
+    latency_file.write_text(
+        json.dumps(
+            {
+                "collector": "ebpf_io_latency",
+                "created_at": created_at,
+                "unit": "us",
+                "total_events": 100,
+                "events": [
+                    {
+                        "event": "read",
+                        "total_count": 100,
+                        "histogram": [
+                            {"bucket": "0-10", "count": 90, "percent": 90.0},
+                            {"bucket": "10-100", "count": 0, "percent": 0.0},
+                            {"bucket": "100-1000", "count": 0, "percent": 0.0},
+                            {"bucket": "1000-10000", "count": 10, "percent": tail_1ms_percent},
+                            {"bucket": "10000+", "count": 0, "percent": 0.0},
+                        ],
+                        "p50_bucket": "0-10",
+                        "p95_bucket": p99_bucket,
+                        "p99_bucket": p99_bucket,
+                        "tail_1ms_count": 10,
+                        "tail_1ms_percent": tail_1ms_percent,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    job = {
+        "job_id": job_id,
+        "status": "DONE",
+        "reason": "job completed successfully",
+        "spec": {
+            "job_id": job_id,
+            "pid": 1234,
+            "duration_seconds": 5,
+            "sample_frequency": 99,
+            "collector": "ebpf_io_latency",
+            "target": {"comm": "io_latency_hotspot"},
+        },
+        "artifacts": {"ebpf_io_latency": str(latency_file)},
+        "error_message": None,
+        "created_at": created_at,
+        "updated_at": created_at,
+    }
+    (job_dir / "job.json").write_text(json.dumps(job), encoding="utf-8")

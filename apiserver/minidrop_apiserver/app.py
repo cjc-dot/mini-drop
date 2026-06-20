@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 from typing import Literal
@@ -8,6 +9,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+
+from minidrop_analysis.latency_diff import compare_latency_reports, no_latency_baseline_report
 
 from .agent_store import AgentRegistry
 from .process import ProcessInspector
@@ -146,6 +149,34 @@ def create_app(runtime_dir: str | None = None, process_inspector: ProcessInspect
             raise HTTPException(status_code=404, detail="artifact file not found")
         return FileResponse(path)
 
+    @app.get("/api/jobs/{job_id}/compare/ebpf-io-latency")
+    def compare_ebpf_io_latency(job_id: str, baseline_job_id: str | None = None) -> dict:
+        current_job = store.get_job(job_id)
+        if current_job is None:
+            raise HTTPException(status_code=404, detail="job not found")
+        if "ebpf_io_latency" not in current_job.get("artifacts", {}):
+            raise HTTPException(status_code=404, detail="current job has no ebpf_io_latency artifact")
+
+        if baseline_job_id:
+            baseline_job = store.get_job(baseline_job_id)
+            if baseline_job is None:
+                raise HTTPException(status_code=404, detail="baseline job not found")
+            if "ebpf_io_latency" not in baseline_job.get("artifacts", {}):
+                raise HTTPException(status_code=404, detail="baseline job has no ebpf_io_latency artifact")
+        else:
+            baseline_job = _find_previous_ebpf_latency_job(store.list_jobs(), current_job)
+            if baseline_job is None:
+                return no_latency_baseline_report(current_job_id=job_id)
+
+        current_report = _load_json_artifact(current_job, "ebpf_io_latency", runtime_root)
+        baseline_report = _load_json_artifact(baseline_job, "ebpf_io_latency", runtime_root)
+        return compare_latency_reports(
+            baseline=baseline_report,
+            current=current_report,
+            baseline_job_id=baseline_job["job_id"],
+            current_job_id=job_id,
+        )
+
     @app.post("/api/agents/{agent_id}/heartbeat")
     def agent_heartbeat(agent_id: str, request: AgentHeartbeatRequest) -> dict:
         return agents.record_heartbeat(
@@ -236,3 +267,38 @@ def create_app(runtime_dir: str | None = None, process_inspector: ProcessInspect
         return agents.get_agent_events(agent_id)
 
     return app
+
+
+def _load_json_artifact(job: dict, artifact_name: str, runtime_root: Path) -> dict:
+    artifact_path = job.get("artifacts", {}).get(artifact_name)
+    if artifact_path is None:
+        raise HTTPException(status_code=404, detail=f"{artifact_name} artifact not found")
+    path = Path(artifact_path).expanduser().resolve()
+    try:
+        path.relative_to(runtime_root)
+    except ValueError as exc:
+        raise HTTPException(status_code=403, detail="artifact outside runtime dir") from exc
+    if not path.exists() or not path.is_file():
+        raise HTTPException(status_code=404, detail="artifact file not found")
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _find_previous_ebpf_latency_job(jobs: list[dict], current_job: dict) -> dict | None:
+    current_created_at = current_job.get("created_at", "")
+    current_job_id = current_job.get("job_id")
+    current_comm = current_job.get("spec", {}).get("target", {}).get("comm")
+
+    for job in jobs:
+        if job.get("job_id") == current_job_id:
+            continue
+        if job.get("status") != "DONE":
+            continue
+        if "ebpf_io_latency" not in job.get("artifacts", {}):
+            continue
+        if current_created_at and job.get("created_at", "") >= current_created_at:
+            continue
+        job_comm = job.get("spec", {}).get("target", {}).get("comm")
+        if current_comm and job_comm and job_comm != current_comm:
+            continue
+        return job
+    return None
