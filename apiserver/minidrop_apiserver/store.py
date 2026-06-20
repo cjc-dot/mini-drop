@@ -50,6 +50,7 @@ class ServerJobStore:
     def __init__(self, runtime_dir: str) -> None:
         self.runtime_dir = Path(runtime_dir).expanduser().resolve()
         self.jobs_dir = self.runtime_dir / "jobs"
+        self.continuous_dir = self.runtime_dir / "continuous_profiles"
 
     def create_job(
         self,
@@ -58,21 +59,25 @@ class ServerJobStore:
         sample_frequency: int,
         collector: str = "perf",
         target: dict | None = None,
+        extra_spec: dict | None = None,
     ) -> dict:
         job_id = self._new_job_id()
         created_at = self._now()
+        spec = {
+            "job_id": job_id,
+            "pid": pid,
+            "duration_seconds": duration_seconds,
+            "sample_frequency": sample_frequency,
+            "collector": collector,
+            "target": target or {},
+        }
+        if extra_spec:
+            spec.update(extra_spec)
         job = {
             "job_id": job_id,
             "status": "PENDING",
             "reason": "job created by api server",
-            "spec": {
-                "job_id": job_id,
-                "pid": pid,
-                "duration_seconds": duration_seconds,
-                "sample_frequency": sample_frequency,
-                "collector": collector,
-                "target": target or {},
-            },
+            "spec": spec,
             "artifacts": {},
             "error_message": None,
             "created_at": created_at,
@@ -82,6 +87,86 @@ class ServerJobStore:
         self._write_job(job)
         self._append_event(job_id, "PENDING", "job created by api server")
         return job
+
+    def create_continuous_profile(
+        self,
+        pid: int,
+        slice_duration_seconds: int,
+        sample_frequency: int,
+        collector: str,
+        slice_count: int,
+        interval_seconds: int,
+        target: dict | None = None,
+    ) -> dict:
+        session_id = self._new_continuous_session_id()
+        created_at = self._now()
+        base_time = datetime.now(timezone.utc)
+        jobs: list[dict] = []
+
+        for index in range(slice_count):
+            scheduled_at = (
+                base_time + timedelta(seconds=index * (slice_duration_seconds + interval_seconds))
+            ).isoformat()
+            job = self.create_job(
+                pid=pid,
+                duration_seconds=slice_duration_seconds,
+                sample_frequency=sample_frequency,
+                collector=collector,
+                target=target,
+                extra_spec={
+                    "scheduled_at": scheduled_at,
+                    "continuous": {
+                        "session_id": session_id,
+                        "slice_index": index + 1,
+                        "slice_count": slice_count,
+                        "interval_seconds": interval_seconds,
+                    },
+                },
+            )
+            jobs.append(
+                {
+                    "job_id": job["job_id"],
+                    "slice_index": index + 1,
+                    "scheduled_at": scheduled_at,
+                }
+            )
+
+        session = {
+            "session_id": session_id,
+            "status": "SCHEDULED",
+            "reason": "continuous profiling session created",
+            "pid": pid,
+            "collector": collector,
+            "slice_duration_seconds": slice_duration_seconds,
+            "sample_frequency": sample_frequency,
+            "slice_count": slice_count,
+            "interval_seconds": interval_seconds,
+            "target": target or {},
+            "jobs": jobs,
+            "created_at": created_at,
+            "updated_at": self._now(),
+        }
+        self._write_continuous_session(session)
+        return self._hydrate_continuous_session(session)
+
+    def list_continuous_profiles(self) -> list[dict]:
+        if not self.continuous_dir.exists():
+            return []
+
+        sessions = []
+        for session_file in self.continuous_dir.glob("*/session.json"):
+            sessions.append(
+                self._hydrate_continuous_session(
+                    json.loads(session_file.read_text(encoding="utf-8"))
+                )
+            )
+        return sorted(sessions, key=lambda session: session.get("created_at", ""), reverse=True)
+
+    def get_continuous_profile(self, session_id: str) -> dict | None:
+        session_file = self._continuous_session_file(session_id)
+        if not session_file.exists():
+            return None
+        return self._hydrate_continuous_session(json.loads(session_file.read_text(encoding="utf-8")))
 
     def list_jobs(self) -> list[dict]:
         if not self.jobs_dir.exists():
@@ -121,6 +206,9 @@ class ServerJobStore:
             with self._job_lock(job_id):
                 job = self.get_job(job_id)
                 if job is None or job.get("status") != "PENDING":
+                    continue
+
+                if self._is_scheduled_for_future(job):
                     continue
 
                 if self._has_exhausted_claim_attempts(job, max_claim_attempts):
@@ -514,17 +602,30 @@ class ServerJobStore:
     def _is_pending_expired(job: dict, max_pending_age_seconds: int | None) -> bool:
         if max_pending_age_seconds is None:
             return False
-        created_at = job.get("created_at")
-        if not created_at:
+        pending_since = job.get("spec", {}).get("scheduled_at") or job.get("created_at")
+        if not pending_since:
             return False
         try:
-            created = datetime.fromisoformat(str(created_at).replace("Z", "+00:00"))
+            created = datetime.fromisoformat(str(pending_since).replace("Z", "+00:00"))
         except ValueError:
             return False
         if created.tzinfo is None:
             created = created.replace(tzinfo=timezone.utc)
         age_seconds = (datetime.now(timezone.utc) - created).total_seconds()
         return age_seconds > max_pending_age_seconds
+
+    @staticmethod
+    def _is_scheduled_for_future(job: dict) -> bool:
+        scheduled_at = job.get("spec", {}).get("scheduled_at")
+        if not scheduled_at:
+            return False
+        try:
+            scheduled = datetime.fromisoformat(str(scheduled_at).replace("Z", "+00:00"))
+        except ValueError:
+            return False
+        if scheduled.tzinfo is None:
+            scheduled = scheduled.replace(tzinfo=timezone.utc)
+        return datetime.now(timezone.utc) < scheduled
 
     @staticmethod
     def _is_time_expired(value: str) -> bool:
@@ -549,6 +650,53 @@ class ServerJobStore:
     def _events_file(self, job_id: str) -> Path:
         return self._job_dir(job_id) / "events.jsonl"
 
+    def _continuous_session_dir(self, session_id: str) -> Path:
+        return self.continuous_dir / session_id
+
+    def _continuous_session_file(self, session_id: str) -> Path:
+        return self._continuous_session_dir(session_id) / "session.json"
+
+    def _write_continuous_session(self, session: dict) -> None:
+        session["updated_at"] = self._now()
+        self._write_json_atomic(self._continuous_session_file(session["session_id"]), session)
+
+    def _hydrate_continuous_session(self, session: dict) -> dict:
+        hydrated = dict(session)
+        hydrated_jobs = []
+        counts: dict[str, int] = {}
+
+        for item in session.get("jobs", []):
+            job_id = item.get("job_id")
+            job = self.get_job(job_id) if job_id else None
+            status = job.get("status", "MISSING") if job else "MISSING"
+            counts[status] = counts.get(status, 0) + 1
+            hydrated_jobs.append(
+                {
+                    **item,
+                    "status": status,
+                    "reason": job.get("reason") if job else "job metadata missing",
+                    "artifacts": job.get("artifacts", {}) if job else {},
+                    "created_at": job.get("created_at") if job else None,
+                    "updated_at": job.get("updated_at") if job else None,
+                }
+            )
+
+        if counts.get("FAILED"):
+            status = "FAILED"
+        elif counts.get("DONE") == len(hydrated_jobs) and hydrated_jobs:
+            status = "DONE"
+        elif counts.get("RUNNING") or counts.get("UPLOADING"):
+            status = "RUNNING"
+        elif counts.get("PENDING"):
+            status = "SCHEDULED"
+        else:
+            status = "UNKNOWN"
+
+        hydrated["status"] = status
+        hydrated["status_counts"] = counts
+        hydrated["jobs"] = hydrated_jobs
+        return hydrated
+
 
     @staticmethod
     def _now() -> str:
@@ -558,6 +706,11 @@ class ServerJobStore:
     def _new_job_id() -> str:
         stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
         return f"job-{stamp}-{uuid4().hex[:6]}"
+
+    @staticmethod
+    def _new_continuous_session_id() -> str:
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        return f"cont-{stamp}-{uuid4().hex[:6]}"
 
     @staticmethod
     def _write_json_atomic(path: Path, payload: dict) -> None:

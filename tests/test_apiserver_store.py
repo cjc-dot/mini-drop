@@ -35,6 +35,51 @@ def test_list_jobs_returns_newest_first(tmp_path: Path) -> None:
     assert [job["job_id"] for job in jobs] == [second["job_id"], first["job_id"]]
 
 
+def test_create_continuous_profile_schedules_multiple_slice_jobs(tmp_path: Path) -> None:
+    store = ServerJobStore(str(tmp_path))
+
+    session = store.create_continuous_profile(
+        pid=1234,
+        slice_duration_seconds=5,
+        sample_frequency=49,
+        collector="perf",
+        slice_count=3,
+        interval_seconds=1,
+        target={"comm": "cpu_hotspot"},
+    )
+
+    assert session["status"] == "SCHEDULED"
+    assert session["slice_count"] == 3
+    assert session["status_counts"] == {"PENDING": 3}
+    assert len(session["jobs"]) == 3
+
+    first_job = store.get_job(session["jobs"][0]["job_id"])
+    assert first_job["spec"]["duration_seconds"] == 5
+    assert first_job["spec"]["sample_frequency"] == 49
+    assert first_job["spec"]["continuous"]["session_id"] == session["session_id"]
+    assert first_job["spec"]["continuous"]["slice_index"] == 1
+    assert first_job["spec"]["scheduled_at"] == session["jobs"][0]["scheduled_at"]
+
+
+def test_claim_pending_job_skips_continuous_slice_scheduled_for_future(tmp_path: Path) -> None:
+    store = ServerJobStore(str(tmp_path))
+    future = (
+        datetime.now(timezone.utc) + timedelta(seconds=60)
+    ).isoformat()
+    scheduled = store.create_job(
+        pid=1001,
+        duration_seconds=5,
+        sample_frequency=49,
+        extra_spec={"scheduled_at": future},
+    )
+    ready = store.create_job(pid=1002, duration_seconds=5, sample_frequency=49)
+
+    claim = store.claim_pending_job(agent_id="agent-1")
+
+    assert claim["job"]["job_id"] == ready["job_id"]
+    assert store.get_job(scheduled["job_id"])["status"] == "PENDING"
+
+
 def test_get_missing_job_returns_none(tmp_path: Path) -> None:
     store = ServerJobStore(str(tmp_path))
 

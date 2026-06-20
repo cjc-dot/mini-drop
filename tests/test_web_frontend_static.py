@@ -20,7 +20,10 @@ def test_web_frontend_uses_existing_api_routes() -> None:
 
     assert 'fetchJson("/api/jobs")' in app_js
     assert 'fetchJson("/api/agents")' in app_js
-    assert 'fetchJson("/api/jobs", {' in app_js
+    assert 'fetchJson("/api/continuous-profiles")' in app_js
+    assert '"/api/continuous-profiles"' in app_js
+    assert 'const url = continuous ? "/api/continuous-profiles" : "/api/jobs";' in app_js
+    assert "fetchJson(url, {" in app_js
     assert "/artifacts/hotspots" in app_js
     assert "/artifacts/suggestions" in app_js
     assert "/artifacts/ebpf_syscalls" in app_js
@@ -29,6 +32,8 @@ def test_web_frontend_uses_existing_api_routes() -> None:
     assert "/compare/ebpf-io-latency" in app_js
     assert "/report" in app_js
     assert "collectorInput" in app_js
+    assert "continuousInput" in app_js
+    assert "renderContinuousProfiles" in app_js
 
 
 def test_web_frontend_contains_job_report_panel() -> None:
@@ -47,7 +52,12 @@ def test_web_frontend_contains_job_report_panel() -> None:
     assert 'id="pyspyBody"' in index
     assert 'id="diagnosisBody"' in index
     assert 'id="collectorInput"' in index
+    assert 'id="continuousInput"' in index
+    assert 'id="sliceCountInput"' in index
+    assert 'id="intervalInput"' in index
+    assert 'id="continuousBody"' in index
     assert "Rate/s" in index
+    assert "Continuous Profiles" in index
     assert "Diagnosis Report" in index
     assert "eBPF IO Latency" in index
     assert "eBPF Baseline Diff" in index

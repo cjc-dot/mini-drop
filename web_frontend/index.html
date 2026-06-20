@@ -43,6 +43,21 @@
               <option value="py_spy">py-spy Python profile</option>
             </select>
           </label>
+          <label class="checkbox-label">
+            <span>Mode</span>
+            <span class="checkbox-row">
+              <input id="continuousInput" name="continuous" type="checkbox" />
+              Continuous
+            </span>
+          </label>
+          <label>
+            <span>Slices</span>
+            <input id="sliceCountInput" name="slice_count" type="number" min="1" max="20" value="3" required />
+          </label>
+          <label>
+            <span>Interval</span>
+            <input id="intervalInput" name="interval" type="number" min="0" value="0" required />
+          </label>
           <button type="submit">Create</button>
         </form>
       </section>
@@ -65,6 +80,27 @@
               </tr>
             </thead>
             <tbody id="agentsBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-title">
+          <h2>Continuous Profiles</h2>
+          <span id="continuousCount" class="muted">0</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Session</th>
+                <th>Status</th>
+                <th>Collector</th>
+                <th>Slices</th>
+                <th>Target</th>
+              </tr>
+            </thead>
+            <tbody id="continuousBody"></tbody>
           </table>
         </div>
       </section>

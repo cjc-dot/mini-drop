@@ -1,7 +1,9 @@
 const jobsBody = document.querySelector("#jobsBody");
 const agentsBody = document.querySelector("#agentsBody");
+const continuousBody = document.querySelector("#continuousBody");
 const jobCount = document.querySelector("#jobCount");
 const agentCount = document.querySelector("#agentCount");
+const continuousCount = document.querySelector("#continuousCount");
 const createStatus = document.querySelector("#createStatus");
 const refreshButton = document.querySelector("#refreshButton");
 const createJobForm = document.querySelector("#createJobForm");
@@ -79,6 +81,34 @@ function renderAgents(agents) {
   `).join("");
 }
 
+function renderContinuousProfiles(sessions) {
+  continuousCount.textContent = String(sessions.length);
+  if (sessions.length === 0) {
+    continuousBody.innerHTML = `<tr><td colspan="5" class="empty">No continuous profiles</td></tr>`;
+    return;
+  }
+
+  continuousBody.innerHTML = sessions.slice(0, 8).map((session) => {
+    const counts = session.status_counts || {};
+    const target = session.target || {};
+    const slices = [
+      counts.DONE ? `${counts.DONE} done` : null,
+      counts.RUNNING ? `${counts.RUNNING} running` : null,
+      counts.PENDING ? `${counts.PENDING} pending` : null,
+      counts.FAILED ? `${counts.FAILED} failed` : null,
+    ].filter(Boolean).join(" / ") || `${session.slice_count || 0} scheduled`;
+    return `
+      <tr>
+        <td class="mono">${escapeHtml(session.session_id || "-")}</td>
+        <td>${statusBadge(session.status)}</td>
+        <td>${escapeHtml(session.collector || "-")}</td>
+        <td>${escapeHtml(slices)}</td>
+        <td>${escapeHtml(target.comm || target.cmdline || session.pid || "-")}</td>
+      </tr>
+    `;
+  }).join("");
+}
+
 function renderJobs(jobs) {
   jobCount.textContent = String(jobs.length);
   if (jobs.length === 0) {
@@ -96,7 +126,9 @@ function renderJobs(jobs) {
       || job.artifacts.ebpf_io_latency
       || job.artifacts.pyspy_profile
     );
-    const result = hasReport ? "analysis ready" : (job.reason || "-");
+    const continuous = spec.continuous || null;
+    const prefix = continuous ? `slice ${continuous.slice_index}/${continuous.slice_count} · ` : "";
+    const result = prefix + (hasReport ? "analysis ready" : (job.reason || "-"));
     const selectedClass = job.job_id === selectedJobId ? "selected-row" : "";
     return `
       <tr class="${selectedClass}">
@@ -488,12 +520,14 @@ async function loadJobReport(jobId, options = {}) {
 async function refreshDashboard() {
   refreshButton.disabled = true;
   try {
-    const [jobs, agents] = await Promise.all([
+    const [jobs, agents, sessions] = await Promise.all([
       fetchJson("/api/jobs"),
       fetchJson("/api/agents"),
+      fetchJson("/api/continuous-profiles"),
     ]);
     renderJobs(jobs);
     renderAgents(agents);
+    renderContinuousProfiles(sessions);
     if (!selectedJobId) {
       const latestReportJob = jobs.find((job) => job.artifacts && (
         job.artifacts.hotspots
@@ -517,6 +551,7 @@ async function refreshDashboard() {
 createJobForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   createStatus.textContent = "Creating...";
+  const continuous = document.querySelector("#continuousInput").checked;
   const payload = {
     pid: Number(document.querySelector("#pidInput").value),
     duration_seconds: Number(document.querySelector("#durationInput").value),
@@ -525,12 +560,25 @@ createJobForm.addEventListener("submit", async (event) => {
   };
 
   try {
-    const job = await fetchJson("/api/jobs", {
+    const url = continuous ? "/api/continuous-profiles" : "/api/jobs";
+    const body = continuous
+      ? {
+          pid: payload.pid,
+          slice_duration_seconds: payload.duration_seconds,
+          sample_frequency: payload.sample_frequency,
+          collector: payload.collector,
+          slice_count: Number(document.querySelector("#sliceCountInput").value),
+          interval_seconds: Number(document.querySelector("#intervalInput").value),
+        }
+      : payload;
+    const created = await fetchJson(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(body),
     });
-    createStatus.textContent = `Created ${job.job_id}`;
+    createStatus.textContent = continuous
+      ? `Created ${created.session_id}`
+      : `Created ${created.job_id}`;
     await refreshDashboard();
   } catch (error) {
     createStatus.textContent = error.message;

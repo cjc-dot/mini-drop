@@ -25,6 +25,15 @@ class CreateJobRequest(BaseModel):
     collector: Literal["perf", "ebpf_syscall", "ebpf_io_latency", "py_spy"] = "perf"
 
 
+class CreateContinuousProfileRequest(BaseModel):
+    pid: int = Field(gt=0)
+    slice_duration_seconds: int = Field(default=5, gt=0)
+    sample_frequency: int = Field(default=49, gt=0)
+    collector: Literal["perf", "ebpf_syscall", "ebpf_io_latency", "py_spy"] = "perf"
+    slice_count: int = Field(default=3, gt=0, le=20)
+    interval_seconds: int = Field(default=0, ge=0)
+
+
 class AgentHeartbeatRequest(BaseModel):
     hostname: str = Field(min_length=1)
     pid: int = Field(gt=0)
@@ -102,6 +111,38 @@ def create_app(runtime_dir: str | None = None, process_inspector: ProcessInspect
             collector=request.collector,
             target=target,
         )
+
+    @app.post("/api/continuous-profiles", status_code=201)
+    def create_continuous_profile(request: CreateContinuousProfileRequest) -> dict:
+        target = inspector.inspect(request.pid)
+        if target is None:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "code": "TARGET_PROCESS_NOT_FOUND",
+                    "message": f"target pid {request.pid} does not exist",
+                },
+            )
+        return store.create_continuous_profile(
+            pid=request.pid,
+            slice_duration_seconds=request.slice_duration_seconds,
+            sample_frequency=request.sample_frequency,
+            collector=request.collector,
+            slice_count=request.slice_count,
+            interval_seconds=request.interval_seconds,
+            target=target,
+        )
+
+    @app.get("/api/continuous-profiles")
+    def list_continuous_profiles() -> list[dict]:
+        return store.list_continuous_profiles()
+
+    @app.get("/api/continuous-profiles/{session_id}")
+    def get_continuous_profile(session_id: str) -> dict:
+        session = store.get_continuous_profile(session_id)
+        if session is None:
+            raise HTTPException(status_code=404, detail="continuous profile not found")
+        return session
 
     @app.get("/api/jobs")
     def list_jobs() -> list[dict]:

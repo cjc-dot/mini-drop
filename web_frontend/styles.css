@@ -81,7 +81,7 @@ body {
 
 .job-form {
   display: grid;
-  grid-template-columns: repeat(5, minmax(120px, 1fr));
+  grid-template-columns: repeat(8, minmax(105px, 1fr));
   gap: 12px;
   padding: 16px;
 }
@@ -101,6 +101,24 @@ select {
   border-radius: 6px;
   padding: 0 10px;
   font: inherit;
+}
+
+.checkbox-label {
+  min-width: 105px;
+}
+
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  color: var(--text);
+}
+
+.checkbox-row input {
+  width: 16px;
+  height: 16px;
+  padding: 0;
 }
 
 button {
@@ -221,6 +239,7 @@ tr.selected-row .link-button {
 .badge.pending,
 .badge.running,
 .badge.uploading,
+.badge.scheduled,
 .badge.heartbeat,
 .badge.unknown {
   background: #fff4d6;

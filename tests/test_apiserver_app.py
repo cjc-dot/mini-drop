@@ -103,6 +103,63 @@ def test_create_job_accepts_py_spy_collector(tmp_path) -> None:
     assert response.json()["spec"]["collector"] == "py_spy"
 
 
+def test_create_and_list_continuous_profile_over_http(tmp_path) -> None:
+    target = {
+        "pid": 1234,
+        "comm": "cpu_hotspot",
+        "cmdline": "/tmp/cpu_hotspot",
+        "starttime": 42,
+    }
+    client = TestClient(create_app(str(tmp_path), process_inspector=FakeProcessInspector({1234: target})))
+
+    response = client.post(
+        "/api/continuous-profiles",
+        json={
+            "pid": 1234,
+            "slice_duration_seconds": 5,
+            "sample_frequency": 49,
+            "collector": "perf",
+            "slice_count": 3,
+            "interval_seconds": 1,
+        },
+    )
+
+    assert response.status_code == 201
+    session = response.json()
+    assert session["status"] == "SCHEDULED"
+    assert session["pid"] == 1234
+    assert session["collector"] == "perf"
+    assert session["status_counts"] == {"PENDING": 3}
+    assert len(session["jobs"]) == 3
+
+    list_response = client.get("/api/continuous-profiles")
+    assert list_response.status_code == 200
+    assert list_response.json()[0]["session_id"] == session["session_id"]
+
+    get_response = client.get(f"/api/continuous-profiles/{session['session_id']}")
+    assert get_response.status_code == 200
+    assert get_response.json()["jobs"][0]["status"] == "PENDING"
+
+
+def test_create_continuous_profile_rejects_missing_target_pid(tmp_path) -> None:
+    client = TestClient(create_app(str(tmp_path), process_inspector=FakeProcessInspector({})))
+
+    response = client.post(
+        "/api/continuous-profiles",
+        json={
+            "pid": 999999,
+            "slice_duration_seconds": 5,
+            "sample_frequency": 49,
+            "collector": "perf",
+            "slice_count": 3,
+            "interval_seconds": 1,
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"]["code"] == "TARGET_PROCESS_NOT_FOUND"
+
+
 def test_agent_claim_and_finish_job_over_http(tmp_path) -> None:
     target = {
         "pid": 1234,
