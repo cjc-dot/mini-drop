@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+
 from fastapi.testclient import TestClient
 
 from minidrop_apiserver.app import create_app
@@ -98,3 +100,38 @@ def test_agent_finish_rejects_unclaimed_job_over_http(tmp_path) -> None:
     )
 
     assert response.status_code == 409
+
+
+def test_agent_uploads_artifacts_over_http_before_finish(tmp_path) -> None:
+    client = TestClient(create_app(str(tmp_path), process_inspector=FakeProcessInspector({1234: {"pid": 1234}})))
+    created = client.post(
+        "/api/jobs",
+        json={"pid": 1234, "duration_seconds": 10, "sample_frequency": 99},
+    ).json()
+    client.post("/api/agents/local-agent/jobs/claim", json={"max_pending_age_seconds": 300})
+
+    upload_response = client.post(
+        f"/api/agents/local-agent/jobs/{created['job_id']}/artifacts",
+        json={
+            "encoding": "base64",
+            "artifacts": {
+                "flamegraph": base64.b64encode(b"<svg>uploaded</svg>").decode("ascii"),
+            },
+        },
+    )
+
+    assert upload_response.status_code == 200
+    uploaded = upload_response.json()
+    assert uploaded["status"] == "UPLOADING"
+    flamegraph = tmp_path / "profiles" / created["job_id"] / "flamegraph.svg"
+    assert flamegraph.read_text(encoding="utf-8") == "<svg>uploaded</svg>"
+
+    finish_response = client.post(
+        f"/api/agents/local-agent/jobs/{created['job_id']}/finish",
+        json={"status": "DONE"},
+    )
+
+    assert finish_response.status_code == 200
+    assert finish_response.json()["artifacts"]["flamegraph"] == str(flamegraph)
+    events = client.get(f"/api/jobs/{created['job_id']}/events").json()
+    assert [event["status"] for event in events] == ["PENDING", "RUNNING", "UPLOADING", "DONE"]

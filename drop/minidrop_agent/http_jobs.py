@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 from pathlib import Path
 from typing import Protocol
@@ -11,6 +12,17 @@ from minidrop_analysis.perf import PerfCollector, ProfileSummary
 
 from .job import JobResult, JobSpec
 from .process import ProcessInspector
+
+
+UPLOADABLE_ARTIFACTS = {
+    "perf_script",
+    "folded_stack",
+    "flamegraph",
+    "hotspots",
+    "suggestions",
+    "suggestions_markdown",
+    "summary",
+}
 
 
 class Collector(Protocol):
@@ -37,14 +49,22 @@ class ServerJobClient:
         error_message: str | None = None,
         reason: str | None = None,
     ) -> dict:
+        payload = {
+            "status": status,
+            "error_message": error_message,
+            "reason": reason,
+        }
+        if artifacts is not None:
+            payload["artifacts"] = artifacts
         return self._post_json(
             f"/api/agents/{quote(agent_id, safe='')}/jobs/{quote(job_id, safe='')}/finish",
-            {
-                "status": status,
-                "artifacts": artifacts or {},
-                "error_message": error_message,
-                "reason": reason,
-            },
+            payload,
+        )
+
+    def upload_artifacts(self, agent_id: str, job_id: str, artifacts: dict[str, str]) -> dict:
+        return self._post_json(
+            f"/api/agents/{quote(agent_id, safe='')}/jobs/{quote(job_id, safe='')}/artifacts",
+            {"encoding": "base64", "artifacts": self._encode_uploadable_artifacts(artifacts)},
         )
 
     def _post_json(self, path: str, payload: dict) -> dict:
@@ -63,6 +83,21 @@ class ServerJobClient:
             raise RuntimeError(f"server rejected job request: HTTP {exc.code}: {detail}") from exc
         except URLError as exc:
             raise RuntimeError(f"server job request failed: {exc.reason}") from exc
+
+    @staticmethod
+    def _encode_uploadable_artifacts(artifacts: dict[str, str]) -> dict[str, str]:
+        payloads = {}
+        for name, artifact_path in artifacts.items():
+            if name not in UPLOADABLE_ARTIFACTS:
+                continue
+            path = Path(artifact_path).expanduser()
+            if not path.exists() or not path.is_file():
+                continue
+            try:
+                payloads[name] = base64.b64encode(path.read_bytes()).decode("ascii")
+            except OSError:
+                continue
+        return payloads
 
 
 class HttpJobRunner:
@@ -135,37 +170,43 @@ class HttpJobRunner:
                 sample_frequency=spec.sample_frequency,
                 output_dir=str(output_dir),
             )
+        except Exception as exc:
+            return self._finish_failed(spec, job_file, output_dir, "collector failed", str(exc))
+
+        try:
+            uploaded = self.client.upload_artifacts(
+                agent_id=self.agent_id,
+                job_id=spec.job_id,
+                artifacts=summary.artifacts,
+            )
+            server_artifacts = uploaded.get("artifacts", {})
+        except Exception as exc:
+            return self._finish_failed(spec, job_file, output_dir, "artifact upload failed", str(exc))
+
+        try:
             finished = self.client.finish(
                 agent_id=self.agent_id,
                 job_id=spec.job_id,
                 status="DONE",
-                artifacts=summary.artifacts,
                 reason="job completed successfully",
             )
-            return JobResult(
-                job_id=spec.job_id,
-                status=finished.get("status", "DONE"),
-                job_file=str(job_file),
-                output_dir=str(output_dir),
-                artifacts=summary.artifacts,
-            )
         except Exception as exc:
-            error_message = str(exc)
-            finished = self.client.finish(
-                agent_id=self.agent_id,
+            return JobResult(
                 job_id=spec.job_id,
                 status="FAILED",
-                reason="collector failed",
-                error_message=error_message,
-            )
-            return JobResult(
-                job_id=spec.job_id,
-                status=finished.get("status", "FAILED"),
                 job_file=str(job_file),
                 output_dir=str(output_dir),
-                artifacts={},
-                error_message=error_message,
+                artifacts=server_artifacts,
+                error_message=str(exc),
             )
+
+        return JobResult(
+            job_id=spec.job_id,
+            status=finished.get("status", "DONE"),
+            job_file=str(job_file),
+            output_dir=str(output_dir),
+            artifacts=server_artifacts,
+        )
 
     @staticmethod
     def _spec_from_job(job: dict) -> JobSpec:
@@ -199,3 +240,20 @@ class HttpJobRunner:
         if actual != expected:
             return "target process changed before collect", f"pid {spec.pid} starttime changed from {expected} to {actual}"
         return None
+
+    def _finish_failed(self, spec: JobSpec, job_file: Path, output_dir: Path, reason: str, error_message: str) -> JobResult:
+        finished = self.client.finish(
+            agent_id=self.agent_id,
+            job_id=spec.job_id,
+            status="FAILED",
+            reason=reason,
+            error_message=error_message,
+        )
+        return JobResult(
+            job_id=spec.job_id,
+            status=finished.get("status", "FAILED"),
+            job_file=str(job_file),
+            output_dir=str(output_dir),
+            artifacts={},
+            error_message=error_message,
+        )

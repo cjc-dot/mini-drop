@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -122,3 +123,54 @@ def test_finish_claimed_job_rejects_other_agent(tmp_path: Path) -> None:
         pass
     else:
         raise AssertionError("finish_claimed_job should reject a different agent")
+
+
+def test_upload_artifacts_writes_files_inside_server_runtime(tmp_path: Path) -> None:
+    store = ServerJobStore(str(tmp_path))
+    pending = store.create_job(pid=1234, duration_seconds=10, sample_frequency=99)
+    store.claim_pending_job(agent_id="agent-1")
+
+    uploaded = store.upload_artifacts(
+        agent_id="agent-1",
+        job_id=pending["job_id"],
+        artifact_payloads={
+            "flamegraph": base64.b64encode(b"<svg>server copy</svg>").decode("ascii"),
+            "hotspots": base64.b64encode(b'{"hotspots": []}').decode("ascii"),
+        },
+    )
+
+    assert uploaded["status"] == "UPLOADING"
+    flamegraph = tmp_path / "profiles" / pending["job_id"] / "flamegraph.svg"
+    hotspots = tmp_path / "profiles" / pending["job_id"] / "hotspots.json"
+    assert flamegraph.read_text(encoding="utf-8") == "<svg>server copy</svg>"
+    assert hotspots.read_text(encoding="utf-8") == '{"hotspots": []}'
+    assert uploaded["artifacts"]["flamegraph"] == str(flamegraph)
+    assert uploaded["artifacts"]["hotspots"] == str(hotspots)
+
+    done = store.finish_claimed_job(agent_id="agent-1", job_id=pending["job_id"], status="DONE")
+
+    assert done["status"] == "DONE"
+    assert done["artifacts"]["flamegraph"] == str(flamegraph)
+    assert [event["status"] for event in store.get_events(pending["job_id"])] == [
+        "PENDING",
+        "RUNNING",
+        "UPLOADING",
+        "DONE",
+    ]
+
+
+def test_upload_artifacts_rejects_unknown_artifact_name(tmp_path: Path) -> None:
+    store = ServerJobStore(str(tmp_path))
+    pending = store.create_job(pid=1234, duration_seconds=10, sample_frequency=99)
+    store.claim_pending_job(agent_id="agent-1")
+
+    try:
+        store.upload_artifacts(
+            agent_id="agent-1",
+            job_id=pending["job_id"],
+            artifact_payloads={"../../bad": base64.b64encode(b"bad").decode("ascii")},
+        )
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("upload_artifacts should reject unknown artifact names")

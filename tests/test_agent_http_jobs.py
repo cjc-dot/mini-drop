@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import base64
 from pathlib import Path
 
-from minidrop_agent.http_jobs import HttpJobRunner
+from minidrop_agent.http_jobs import HttpJobRunner, ServerJobClient
 from minidrop_analysis.perf import ProfileSummary
 
 
@@ -30,6 +31,7 @@ class FakeCollector:
 class FakeClient:
     def __init__(self, claim_response: dict) -> None:
         self.claim_response = claim_response
+        self.uploaded = []
         self.finished = []
 
     def claim(self, agent_id: str, max_pending_age_seconds: int | None = 300) -> dict:
@@ -53,6 +55,14 @@ class FakeClient:
         }
         self.finished.append(payload)
         return payload
+
+    def upload_artifacts(self, agent_id: str, job_id: str, artifacts: dict[str, str]) -> dict:
+        self.uploaded.append({"agent_id": agent_id, "job_id": job_id, "artifacts": artifacts})
+        return {
+            "job_id": job_id,
+            "status": "UPLOADING",
+            "artifacts": {name: f"/server/runtime/profiles/{job_id}/{Path(path).name}" for name, path in artifacts.items()},
+        }
 
 
 class FakeProcessInspector:
@@ -106,8 +116,11 @@ def test_http_job_runner_claims_collects_and_reports_done(tmp_path: Path) -> Non
     assert result is not None
     assert result.status == "DONE"
     assert collector.calls == 1
+    assert client.uploaded[0]["job_id"] == "job-1"
+    assert client.uploaded[0]["artifacts"]["flamegraph"].endswith("flamegraph.svg")
     assert client.finished[0]["status"] == "DONE"
-    assert client.finished[0]["artifacts"]["flamegraph"].endswith("flamegraph.svg")
+    assert client.finished[0]["artifacts"] == {}
+    assert result.artifacts["flamegraph"] == "/server/runtime/profiles/job-1/flamegraph.svg"
 
 
 def test_http_job_runner_reports_failed_when_target_identity_changed(tmp_path: Path) -> None:
@@ -129,3 +142,20 @@ def test_http_job_runner_reports_failed_when_target_identity_changed(tmp_path: P
     assert client.finished[0]["status"] == "FAILED"
     assert client.finished[0]["reason"] == "target process changed before collect"
     assert client.finished[0]["error_message"] == "pid 1234 starttime changed from 42 to 99"
+
+
+def test_server_job_client_skips_raw_perf_data_when_encoding_uploads(tmp_path: Path) -> None:
+    perf_data = tmp_path / "perf.data"
+    perf_data.write_bytes(b"raw perf data")
+    flamegraph = tmp_path / "flamegraph.svg"
+    flamegraph.write_text("<svg></svg>", encoding="utf-8")
+
+    encoded = ServerJobClient._encode_uploadable_artifacts(
+        {
+            "perf_data": str(perf_data),
+            "flamegraph": str(flamegraph),
+        }
+    )
+
+    assert "perf_data" not in encoded
+    assert encoded["flamegraph"] == base64.b64encode(b"<svg></svg>").decode("ascii")

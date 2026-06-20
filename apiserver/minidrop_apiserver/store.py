@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import binascii
 from contextlib import contextmanager
 import json
 import os
@@ -16,6 +18,24 @@ except ImportError:  # pragma: no cover - Windows fallback for local editing.
 
 class InvalidJobTransition(RuntimeError):
     pass
+
+
+class ArtifactUploadError(RuntimeError):
+    pass
+
+
+ARTIFACT_FILENAMES = {
+    "perf_data": "perf.data",
+    "perf_script": "out.perf",
+    "folded_stack": "out.folded",
+    "flamegraph": "flamegraph.svg",
+    "hotspots": "hotspots.json",
+    "suggestions": "suggestions.json",
+    "suggestions_markdown": "suggestions.md",
+    "summary": "summary.json",
+}
+
+MAX_ARTIFACT_BYTES = 20 * 1024 * 1024
 
 
 class ServerJobStore:
@@ -152,19 +172,76 @@ class ServerJobStore:
                     expected_status="RUNNING",
                 )
 
-            uploading = self._transition_job_locked(
-                job=job,
-                status="UPLOADING",
-                reason="artifacts reported by agent",
-                artifacts=artifacts,
-                expected_status="RUNNING",
-            )
+            if job.get("status") == "RUNNING":
+                uploading = self._transition_job_locked(
+                    job=job,
+                    status="UPLOADING",
+                    reason="artifacts reported by agent",
+                    artifacts=artifacts,
+                    expected_status="RUNNING",
+                )
+            elif job.get("status") == "UPLOADING":
+                upload_artifacts = artifacts if artifacts is not None else job.get("artifacts", {})
+                uploading = dict(job)
+                uploading["artifacts"] = upload_artifacts
+            else:
+                raise InvalidJobTransition(
+                    f"cannot finish {job_id} from {job.get('status')}; expected RUNNING or UPLOADING"
+                )
             return self._transition_job_locked(
                 job=uploading,
                 status="DONE",
                 reason=reason or "job completed successfully",
-                artifacts=artifacts,
+                artifacts=uploading.get("artifacts", {}),
                 expected_status="UPLOADING",
+            )
+
+    def upload_artifacts(
+        self,
+        agent_id: str,
+        job_id: str,
+        artifact_payloads: dict[str, str],
+    ) -> dict:
+        if not artifact_payloads:
+            raise ArtifactUploadError("no artifacts provided")
+
+        with self._job_lock(job_id):
+            job = self.get_job(job_id)
+            if job is None:
+                raise FileNotFoundError(f"job not found: {job_id}")
+
+            claimed_by = job.get("claimed_by")
+            if claimed_by is not None and claimed_by != agent_id:
+                raise InvalidJobTransition(f"job {job_id} was claimed by {claimed_by}, not {agent_id}")
+
+            current_status = job.get("status")
+            if current_status not in {"RUNNING", "UPLOADING"}:
+                raise InvalidJobTransition(f"cannot upload artifacts for {job_id} from {current_status}")
+
+            saved_artifacts = dict(job.get("artifacts", {}))
+            profile_dir = self.runtime_dir / "profiles" / job_id
+            profile_dir.mkdir(parents=True, exist_ok=True)
+
+            for name, encoded in artifact_payloads.items():
+                if name not in ARTIFACT_FILENAMES:
+                    raise ArtifactUploadError(f"unsupported artifact: {name}")
+                try:
+                    data = base64.b64decode(encoded.encode("ascii"), validate=True)
+                except (UnicodeEncodeError, binascii.Error) as exc:
+                    raise ArtifactUploadError(f"invalid base64 artifact: {name}") from exc
+                if len(data) > MAX_ARTIFACT_BYTES:
+                    raise ArtifactUploadError(f"artifact too large: {name}")
+
+                path = profile_dir / ARTIFACT_FILENAMES[name]
+                self._write_bytes_atomic(path, data)
+                saved_artifacts[name] = str(path)
+
+            return self._transition_job_locked(
+                job=job,
+                status="UPLOADING",
+                reason="artifacts uploaded by agent",
+                artifacts=saved_artifacts,
+                expected_status=("RUNNING", "UPLOADING"),
             )
 
     def _write_job(self, job: dict) -> None:
@@ -299,6 +376,20 @@ class ServerJobStore:
         try:
             with temp_path.open("w", encoding="utf-8") as stream:
                 stream.write(json.dumps(payload, indent=2))
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temp_path, path)
+        finally:
+            if temp_path.exists():
+                temp_path.unlink()
+
+    @staticmethod
+    def _write_bytes_atomic(path: Path, payload: bytes) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
+        try:
+            with temp_path.open("wb") as stream:
+                stream.write(payload)
                 stream.flush()
                 os.fsync(stream.fileno())
             os.replace(temp_path, path)

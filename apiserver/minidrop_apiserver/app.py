@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 
 from .agent_store import AgentRegistry
 from .process import ProcessInspector
-from .store import ServerJobStore
+from .store import ArtifactUploadError, ServerJobStore
 
 
 class CreateJobRequest(BaseModel):
@@ -33,9 +33,14 @@ class ClaimJobRequest(BaseModel):
 
 class FinishJobRequest(BaseModel):
     status: Literal["DONE", "FAILED"]
-    artifacts: dict[str, str] = Field(default_factory=dict)
+    artifacts: dict[str, str] | None = None
     error_message: str | None = None
     reason: str | None = None
+
+
+class UploadArtifactsRequest(BaseModel):
+    encoding: Literal["base64"] = "base64"
+    artifacts: dict[str, str] = Field(default_factory=dict)
 
 
 def create_app(runtime_dir: str | None = None, process_inspector: ProcessInspector | None = None) -> FastAPI:
@@ -148,6 +153,21 @@ def create_app(runtime_dir: str | None = None, process_inspector: ProcessInspect
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail="job not found") from exc
         except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.post("/api/agents/{agent_id}/jobs/{job_id}/artifacts")
+    def upload_job_artifacts(agent_id: str, job_id: str, request: UploadArtifactsRequest) -> dict:
+        try:
+            return store.upload_artifacts(
+                agent_id=agent_id,
+                job_id=job_id,
+                artifact_payloads=request.artifacts,
+            )
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="job not found") from exc
+        except ArtifactUploadError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except RuntimeError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
