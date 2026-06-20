@@ -93,7 +93,11 @@ def test_generate_advice_reports_high_self_hotspot() -> None:
     assert advice["finding_count"] == 1
     assert advice["findings"][0]["rule_id"] == "cpu_self_hotspot"
     assert advice["findings"][0]["function"] == "hot_func"
+    assert "rule" not in advice["findings"][0]
+    assert advice["findings"][0]["matched_condition"] == "function matches /.+/ and self_percent >= 50.0"
+    assert advice["findings"][0]["reason"] == "`hot_func` matched /.+/; self_percent 75.0 >= 50.0"
     assert advice["findings"][0]["evidence"]["self_percent"] == 75.0
+    assert advice["findings"][0]["next_actions"]
 
 
 def test_format_advice_markdown_contains_evidence() -> None:
@@ -104,6 +108,8 @@ def test_format_advice_markdown_contains_evidence() -> None:
                 "title": "CPU self hotspot",
                 "severity": "HIGH",
                 "function": "hot_func",
+                "matched_condition": "function matches /.+/ and self_percent >= 50.0",
+                "reason": "`hot_func` matched /.+/; self_percent 75.0 >= 50.0",
                 "evidence": {
                     "self_samples": 3,
                     "inclusive_samples": 3,
@@ -111,6 +117,7 @@ def test_format_advice_markdown_contains_evidence() -> None:
                     "inclusive_percent": 75.0,
                 },
                 "advice": "check hot loop",
+                "next_actions": ["inspect source"],
             }
         ],
     }
@@ -119,4 +126,6 @@ def test_format_advice_markdown_contains_evidence() -> None:
 
     assert "CPU self hotspot" in markdown
     assert "`hot_func`" in markdown
+    assert "self_percent >= 50.0" in markdown
+    assert "inspect source" in markdown
     assert "75.0%" in markdown
