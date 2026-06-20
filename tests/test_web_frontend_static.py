@@ -21,6 +21,22 @@ def test_web_frontend_uses_existing_api_routes() -> None:
     assert 'fetchJson("/api/jobs")' in app_js
     assert 'fetchJson("/api/agents")' in app_js
     assert 'fetchJson("/api/jobs", {' in app_js
+    assert "/artifacts/hotspots" in app_js
+    assert "/artifacts/suggestions" in app_js
+
+
+def test_web_frontend_contains_job_report_panel() -> None:
+    root = Path(__file__).resolve().parents[1]
+    index = (root / "web_frontend" / "index.html").read_text(encoding="utf-8")
+    app_js = (root / "web_frontend" / "app.js").read_text(encoding="utf-8")
+
+    assert 'id="jobReportPanel"' in index
+    assert 'class="analysis-workbench"' in index
+    assert 'id="hotspotsBody"' in index
+    assert 'id="suggestionsBody"' in index
+    assert 'data-report-job' in app_js
+    assert "selectedJobId" in app_js
+    assert "loadJobReport" in app_js
 
 
 def test_web_ui_route_serves_index(tmp_path: Path) -> None:

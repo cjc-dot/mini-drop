@@ -60,28 +60,77 @@
         </div>
       </section>
 
-      <section class="panel">
-        <div class="panel-title">
-          <h2>Jobs</h2>
-          <span id="jobCount" class="muted">0</span>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Job</th>
-                <th>Status</th>
-                <th>PID</th>
-                <th>Duration</th>
-                <th>Frequency</th>
-                <th>Reason</th>
-                <th>Artifacts</th>
-              </tr>
-            </thead>
-            <tbody id="jobsBody"></tbody>
-          </table>
-        </div>
-      </section>
+      <div class="analysis-workbench">
+        <section class="panel jobs-panel">
+          <div class="panel-title">
+            <h2>Jobs</h2>
+            <span id="jobCount" class="muted">0</span>
+          </div>
+          <div class="table-wrap jobs-table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Job</th>
+                  <th>Status</th>
+                  <th>PID</th>
+                  <th>Result</th>
+                </tr>
+              </thead>
+              <tbody id="jobsBody"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="jobReportPanel" class="panel report-panel">
+          <div class="panel-title report-title">
+            <div>
+              <h2 id="jobReportTitle">Job Report</h2>
+              <p id="jobReportSubtitle" class="muted">Select a completed job to inspect analysis artifacts</p>
+            </div>
+            <span id="jobReportStatus" class="muted">Idle</span>
+          </div>
+          <div id="jobReportContent" class="report-content">
+            <div id="jobReportMeta" class="meta-grid"></div>
+
+            <section class="report-section">
+              <div class="section-title">
+                <h3>Flame Graph</h3>
+                <a id="flamegraphOpenLink" href="#" target="_blank" class="hidden">Open SVG</a>
+              </div>
+              <iframe id="flamegraphFrame" title="Flame Graph" class="flamegraph-frame"></iframe>
+            </section>
+
+            <section class="report-section">
+              <div class="section-title">
+                <h3>Top Hotspots</h3>
+                <span id="hotspotSummary" class="muted"></span>
+              </div>
+              <div class="table-wrap">
+                <table class="compact-table">
+                  <thead>
+                    <tr>
+                      <th>Function</th>
+                      <th>Self</th>
+                      <th>Incl.</th>
+                      <th>Self %</th>
+                      <th>Incl. %</th>
+                    </tr>
+                  </thead>
+                  <tbody id="hotspotsBody"></tbody>
+                </table>
+              </div>
+            </section>
+
+            <section class="report-section">
+              <div class="section-title">
+                <h3>Suggestions</h3>
+                <span id="suggestionSummary" class="muted"></span>
+              </div>
+              <div id="suggestionsBody" class="suggestions"></div>
+            </section>
+          </div>
+        </section>
+      </div>
     </main>
 
     <script src="/ui/static/app.js"></script>

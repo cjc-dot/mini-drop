@@ -5,6 +5,19 @@ const agentCount = document.querySelector("#agentCount");
 const createStatus = document.querySelector("#createStatus");
 const refreshButton = document.querySelector("#refreshButton");
 const createJobForm = document.querySelector("#createJobForm");
+const jobReportPanel = document.querySelector("#jobReportPanel");
+const jobReportTitle = document.querySelector("#jobReportTitle");
+const jobReportSubtitle = document.querySelector("#jobReportSubtitle");
+const jobReportStatus = document.querySelector("#jobReportStatus");
+const jobReportContent = document.querySelector("#jobReportContent");
+const jobReportMeta = document.querySelector("#jobReportMeta");
+const flamegraphOpenLink = document.querySelector("#flamegraphOpenLink");
+const flamegraphFrame = document.querySelector("#flamegraphFrame");
+const hotspotSummary = document.querySelector("#hotspotSummary");
+const hotspotsBody = document.querySelector("#hotspotsBody");
+const suggestionSummary = document.querySelector("#suggestionSummary");
+const suggestionsBody = document.querySelector("#suggestionsBody");
+let selectedJobId = null;
 
 async function fetchJson(url, options) {
   const response = await fetch(url, options);
@@ -58,38 +71,132 @@ function renderAgents(agents) {
 function renderJobs(jobs) {
   jobCount.textContent = String(jobs.length);
   if (jobs.length === 0) {
-    jobsBody.innerHTML = `<tr><td colspan="7" class="empty">No jobs created</td></tr>`;
+    jobsBody.innerHTML = `<tr><td colspan="4" class="empty">No jobs created</td></tr>`;
     return;
   }
 
   jobsBody.innerHTML = jobs.map((job) => {
     const spec = job.spec || {};
-    const artifactLinks = [];
-    if (job.artifacts && job.artifacts.flamegraph) {
-      artifactLinks.push(`<a href="/api/jobs/${encodeURIComponent(job.job_id)}/artifacts/flamegraph" target="_blank">flamegraph</a>`);
-    }
-    if (job.artifacts && job.artifacts.hotspots) {
-      artifactLinks.push(`<a href="/api/jobs/${encodeURIComponent(job.job_id)}/artifacts/hotspots" target="_blank">hotspots</a>`);
-    }
-    if (job.artifacts && job.artifacts.suggestions) {
-      artifactLinks.push(`<a href="/api/jobs/${encodeURIComponent(job.job_id)}/artifacts/suggestions" target="_blank">suggestions</a>`);
-    }
-    if (job.artifacts && job.artifacts.summary) {
-      artifactLinks.push(`<a href="/api/jobs/${encodeURIComponent(job.job_id)}/artifacts/summary" target="_blank">summary</a>`);
-    }
-    const artifacts = artifactLinks.length ? artifactLinks.join(" ") : "-";
+    const hasReport = job.artifacts && (job.artifacts.hotspots || job.artifacts.suggestions || job.artifacts.flamegraph);
+    const result = hasReport ? "analysis ready" : (job.reason || "-");
+    const selectedClass = job.job_id === selectedJobId ? "selected-row" : "";
     return `
-      <tr>
-        <td class="mono">${escapeHtml(job.job_id)}</td>
+      <tr class="${selectedClass}">
+        <td class="mono"><button type="button" class="link-button" data-report-job="${escapeHtml(job.job_id)}">${escapeHtml(job.job_id)}</button></td>
         <td>${statusBadge(job.status)}</td>
         <td>${escapeHtml(spec.pid || "-")}</td>
-        <td>${escapeHtml(spec.duration_seconds || "-")}s</td>
-        <td>${escapeHtml(spec.sample_frequency || "-")}Hz</td>
-        <td>${escapeHtml(job.reason || "-")}</td>
-        <td>${artifacts}</td>
+        <td><span class="job-result">${escapeHtml(result)}</span></td>
       </tr>
     `;
   }).join("");
+}
+
+function renderReportMeta(job) {
+  const spec = job.spec || {};
+  const target = spec.target || {};
+  const items = [
+    ["Status", statusBadge(job.status)],
+    ["PID", escapeHtml(spec.pid || "-")],
+    ["Duration", `${escapeHtml(spec.duration_seconds || "-")}s`],
+    ["Frequency", `${escapeHtml(spec.sample_frequency || "-")}Hz`],
+    ["Reason", escapeHtml(job.reason || "-")],
+    ["Target", escapeHtml(target.comm || target.cmdline || "-")],
+  ];
+
+  jobReportMeta.innerHTML = items.map(([label, value]) => `
+    <div>
+      <span>${label}</span>
+      <strong>${value}</strong>
+    </div>
+  `).join("");
+}
+
+function renderHotspots(report) {
+  const hotspots = report && Array.isArray(report.hotspots) ? report.hotspots : [];
+  hotspotSummary.textContent = report ? `${report.total_samples || 0} samples` : "not available";
+  if (hotspots.length === 0) {
+    hotspotsBody.innerHTML = `<tr><td colspan="5" class="empty">No hotspot data</td></tr>`;
+    return;
+  }
+
+  hotspotsBody.innerHTML = hotspots.slice(0, 10).map((hotspot) => `
+    <tr>
+      <td class="mono">${escapeHtml(hotspot.function || "-")}</td>
+      <td>${escapeHtml(hotspot.self_samples ?? 0)}</td>
+      <td>${escapeHtml(hotspot.inclusive_samples ?? 0)}</td>
+      <td>${escapeHtml(hotspot.self_percent ?? 0)}%</td>
+      <td>${escapeHtml(hotspot.inclusive_percent ?? 0)}%</td>
+    </tr>
+  `).join("");
+}
+
+function renderSuggestions(report) {
+  const findings = report && Array.isArray(report.findings) ? report.findings : [];
+  suggestionSummary.textContent = report ? `${report.finding_count || findings.length} finding(s)` : "not available";
+  if (findings.length === 0) {
+    suggestionsBody.innerHTML = `<p class="empty">No rule-based suggestions</p>`;
+    return;
+  }
+
+  suggestionsBody.innerHTML = findings.map((finding) => {
+    const evidence = finding.evidence || {};
+    const actions = Array.isArray(finding.next_actions) ? finding.next_actions : [];
+    return `
+      <article class="suggestion">
+        <div class="suggestion-head">
+          <span class="badge ${escapeHtml(String(finding.severity || "INFO").toLowerCase())}">${escapeHtml(finding.severity || "INFO")}</span>
+          <strong>${escapeHtml(finding.title || finding.rule_id || "Suggestion")}</strong>
+        </div>
+        <p class="mono">${escapeHtml(finding.function || "-")}</p>
+        <p>${escapeHtml(finding.reason || finding.matched_condition || "")}</p>
+        <p>Self ${escapeHtml(evidence.self_percent ?? 0)}%, inclusive ${escapeHtml(evidence.inclusive_percent ?? 0)}%.</p>
+        <p>${escapeHtml(finding.advice || "")}</p>
+        ${actions.length ? `<ol>${actions.map((action) => `<li>${escapeHtml(action)}</li>`).join("")}</ol>` : ""}
+      </article>
+    `;
+  }).join("");
+}
+
+async function loadJobReport(jobId, options = {}) {
+  selectedJobId = jobId;
+  document.querySelectorAll("#jobsBody tr").forEach((row) => row.classList.remove("selected-row"));
+  const selectedButton = Array.from(document.querySelectorAll("[data-report-job]"))
+    .find((button) => button.dataset.reportJob === jobId);
+  if (selectedButton) selectedButton.closest("tr").classList.add("selected-row");
+
+  jobReportTitle.textContent = jobId;
+  jobReportSubtitle.textContent = "Loading analysis artifacts";
+  jobReportStatus.textContent = "Loading...";
+  flamegraphFrame.removeAttribute("src");
+  flamegraphOpenLink.classList.add("hidden");
+  hotspotsBody.innerHTML = `<tr><td colspan="5" class="empty">Loading...</td></tr>`;
+  suggestionsBody.innerHTML = `<p class="empty">Loading...</p>`;
+
+  try {
+    const job = await fetchJson(`/api/jobs/${encodeURIComponent(jobId)}`);
+    const artifacts = job.artifacts || {};
+    const [hotspots, suggestions] = await Promise.all([
+      artifacts.hotspots ? fetchJson(`/api/jobs/${encodeURIComponent(jobId)}/artifacts/hotspots`) : Promise.resolve(null),
+      artifacts.suggestions ? fetchJson(`/api/jobs/${encodeURIComponent(jobId)}/artifacts/suggestions`) : Promise.resolve(null),
+    ]);
+
+    renderReportMeta(job);
+    jobReportSubtitle.textContent = `${job.status || "UNKNOWN"} · PID ${(job.spec || {}).pid || "-"}`;
+    if (artifacts.flamegraph) {
+      const flamegraphUrl = `/api/jobs/${encodeURIComponent(jobId)}/artifacts/flamegraph`;
+      flamegraphFrame.src = flamegraphUrl;
+      flamegraphOpenLink.href = flamegraphUrl;
+      flamegraphOpenLink.classList.remove("hidden");
+    }
+    renderHotspots(hotspots);
+    renderSuggestions(suggestions);
+    jobReportStatus.textContent = job.status === "DONE" ? "Analysis ready" : "Artifacts may be incomplete";
+    if (options.scroll && window.matchMedia("(max-width: 1180px)").matches) {
+      jobReportPanel.scrollIntoView({ block: "start", behavior: "smooth" });
+    }
+  } catch (error) {
+    jobReportStatus.textContent = error.message;
+  }
 }
 
 async function refreshDashboard() {
@@ -101,6 +208,12 @@ async function refreshDashboard() {
     ]);
     renderJobs(jobs);
     renderAgents(agents);
+    if (!selectedJobId) {
+      const latestReportJob = jobs.find((job) => job.artifacts && (job.artifacts.hotspots || job.artifacts.suggestions || job.artifacts.flamegraph));
+      if (latestReportJob) {
+        loadJobReport(latestReportJob.job_id);
+      }
+    }
   } catch (error) {
     createStatus.textContent = error.message;
   } finally {
@@ -131,5 +244,10 @@ createJobForm.addEventListener("submit", async (event) => {
 });
 
 refreshButton.addEventListener("click", refreshDashboard);
+jobsBody.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-report-job]");
+  if (!button) return;
+  loadJobReport(button.dataset.reportJob, { scroll: true });
+});
 refreshDashboard();
 setInterval(refreshDashboard, 5000);
