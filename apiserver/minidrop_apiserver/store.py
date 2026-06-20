@@ -37,6 +37,7 @@ ARTIFACT_FILENAMES = {
 
 MAX_ARTIFACT_BYTES = 20 * 1024 * 1024
 DEFAULT_LEASE_SECONDS = 60
+DEFAULT_MAX_CLAIM_ATTEMPTS = 3
 
 
 class ServerJobStore:
@@ -102,17 +103,38 @@ class ServerJobStore:
         agent_id: str,
         max_pending_age_seconds: int | None = 300,
         lease_seconds: int = DEFAULT_LEASE_SECONDS,
+        max_claim_attempts: int = DEFAULT_MAX_CLAIM_ATTEMPTS,
     ) -> dict:
         skipped: list[dict] = []
         if not self.jobs_dir.exists():
             return {"job": None, "skipped": skipped}
 
-        skipped.extend(self.requeue_expired_leases())
+        skipped.extend(self.requeue_expired_leases(max_claim_attempts=max_claim_attempts))
 
         for job_id in self._pending_job_ids_oldest_first():
             with self._job_lock(job_id):
                 job = self.get_job(job_id)
                 if job is None or job.get("status") != "PENDING":
+                    continue
+
+                if self._has_exhausted_claim_attempts(job, max_claim_attempts):
+                    reason = "job claim attempts exhausted before claim"
+                    error_message = self._claim_attempts_exhausted_message(job, max_claim_attempts)
+                    failed = self._transition_job_locked(
+                        job=job,
+                        status="FAILED",
+                        reason=reason,
+                        error_message=error_message,
+                        expected_status="PENDING",
+                    )
+                    skipped.append(
+                        {
+                            "job_id": job_id,
+                            "reason": reason,
+                            "error_message": error_message,
+                            "status": failed["status"],
+                        }
+                    )
                     continue
 
                 if self._is_pending_expired(job, max_pending_age_seconds):
@@ -143,6 +165,7 @@ class ServerJobStore:
                     extra={
                         "claimed_by": agent_id,
                         "claimed_at": self._now(),
+                        "claim_attempts": self._claim_attempts(job) + 1,
                         "lease_token": uuid4().hex,
                         "lease_expires_at": self._lease_deadline(lease_seconds),
                     },
@@ -172,7 +195,7 @@ class ServerJobStore:
             self._write_json_atomic(self._job_file(job_id), renewed)
             return renewed
 
-    def requeue_expired_leases(self) -> list[dict]:
+    def requeue_expired_leases(self, max_claim_attempts: int = DEFAULT_MAX_CLAIM_ATTEMPTS) -> list[dict]:
         skipped: list[dict] = []
         if not self.jobs_dir.exists():
             return skipped
@@ -185,6 +208,32 @@ class ServerJobStore:
                     continue
                 lease_expires_at = job.get("lease_expires_at")
                 if not lease_expires_at or not self._is_time_expired(lease_expires_at):
+                    continue
+
+                if self._has_exhausted_claim_attempts(job, max_claim_attempts):
+                    reason = "job claim attempts exhausted after lease expiration"
+                    error_message = self._claim_attempts_exhausted_message(job, max_claim_attempts)
+                    failed = self._transition_job_locked(
+                        job=job,
+                        status="FAILED",
+                        reason=reason,
+                        artifacts=job.get("artifacts", {}),
+                        error_message=error_message,
+                        expected_status=("RUNNING", "UPLOADING"),
+                        extra={
+                            "lease_token": None,
+                            "lease_expires_at": None,
+                            "previous_claimed_by": job.get("claimed_by"),
+                        },
+                    )
+                    skipped.append(
+                        {
+                            "job_id": job_id,
+                            "reason": reason,
+                            "error_message": error_message,
+                            "status": failed["status"],
+                        }
+                    )
                     continue
 
                 reason = "job lease expired before completion"
@@ -376,6 +425,19 @@ class ServerJobStore:
                 continue
             pending_jobs.append((str(job.get("created_at", "")), job_file.parent.name))
         return [job_id for _, job_id in sorted(pending_jobs)]
+
+    @staticmethod
+    def _claim_attempts(job: dict) -> int:
+        try:
+            return int(job.get("claim_attempts", 0))
+        except (TypeError, ValueError):
+            return 0
+
+    def _has_exhausted_claim_attempts(self, job: dict, max_claim_attempts: int) -> bool:
+        return self._claim_attempts(job) >= max_claim_attempts
+
+    def _claim_attempts_exhausted_message(self, job: dict, max_claim_attempts: int) -> str:
+        return f"job was claimed {self._claim_attempts(job)} time(s); max allowed is {max_claim_attempts}"
 
     @staticmethod
     def _validate_claim_owner(job: dict, agent_id: str, lease_token: str | None) -> None:

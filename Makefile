@@ -16,6 +16,7 @@ HEARTBEAT_COUNT ?= 1
 POLL_INTERVAL ?= 2
 MAX_JOBS ?= 0
 MAX_PENDING_AGE ?= 300
+MAX_CLAIM_ATTEMPTS ?= 3
 DISABLE_PID_CHECK ?= 0
 JOB_SOURCE ?= server
 LEASE_SECONDS ?= 60
@@ -75,6 +76,7 @@ agent-daemon:
 		--poll-interval $(POLL_INTERVAL) \
 		--max-jobs $(MAX_JOBS) \
 		--max-pending-age $(MAX_PENDING_AGE) \
+		--max-claim-attempts $(MAX_CLAIM_ATTEMPTS) \
 		--lease-seconds $(LEASE_SECONDS) \
 		$(if $(filter 1 true yes,$(DISABLE_PID_CHECK)),--disable-pid-check,)
 

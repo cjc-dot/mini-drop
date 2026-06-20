@@ -17,6 +17,7 @@ class PendingJobRunner(Protocol):
         *,
         validate_pid: bool = False,
         max_pending_age_seconds: int | None = None,
+        max_claim_attempts: int = 3,
         on_skip: Callable[[str, str, str | None], None] | None = None,
     ) -> JobResult | None:
         ...
@@ -36,6 +37,7 @@ class AgentDaemon:
         heartbeat_interval_seconds: int = 5,
         poll_interval_seconds: int = 2,
         max_pending_age_seconds: int | None = 300,
+        max_claim_attempts: int = 3,
         validate_pid: bool = True,
         version: str = "0.1.0",
         agent: PendingJobRunner | None = None,
@@ -48,6 +50,7 @@ class AgentDaemon:
         self.heartbeat_interval_seconds = heartbeat_interval_seconds
         self.poll_interval_seconds = poll_interval_seconds
         self.max_pending_age_seconds = max_pending_age_seconds
+        self.max_claim_attempts = max_claim_attempts
         self.validate_pid = validate_pid
         self.version = version
         self.agent = agent or LocalAgent(runtime_dir=runtime_dir)
@@ -66,6 +69,7 @@ class AgentDaemon:
         return self.agent.run_pending_once(
             validate_pid=self.validate_pid,
             max_pending_age_seconds=self.max_pending_age_seconds,
+            max_claim_attempts=self.max_claim_attempts,
             on_skip=self.on_job_skip,
         )
 
@@ -89,6 +93,7 @@ class AgentDaemon:
                 result = self.agent.run_pending_once(
                     validate_pid=self.validate_pid,
                     max_pending_age_seconds=self.max_pending_age_seconds,
+                    max_claim_attempts=self.max_claim_attempts,
                     on_skip=self.on_job_skip,
                 )
                 if result is not None:

@@ -73,6 +73,7 @@ class LocalAgent:
         *,
         validate_pid: bool = False,
         max_pending_age_seconds: int | None = None,
+        max_claim_attempts: int = 3,
         on_skip: Callable[[str, str, str | None], None] | None = None,
     ) -> JobResult | None:
         spec = self.store.claim_pending_spec(

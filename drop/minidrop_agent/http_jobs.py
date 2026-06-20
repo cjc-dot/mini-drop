@@ -44,12 +44,14 @@ class ServerJobClient:
         agent_id: str,
         max_pending_age_seconds: int | None = 300,
         lease_seconds: int = DEFAULT_LEASE_SECONDS,
+        max_claim_attempts: int = 3,
     ) -> dict:
         return self._post_json(
             f"/api/agents/{quote(agent_id, safe='')}/jobs/claim",
             {
                 "max_pending_age_seconds": max_pending_age_seconds,
                 "lease_seconds": lease_seconds,
+                "max_claim_attempts": max_claim_attempts,
             },
         )
 
@@ -158,6 +160,7 @@ class HttpJobRunner:
         *,
         validate_pid: bool = False,
         max_pending_age_seconds: int | None = None,
+        max_claim_attempts: int = 3,
         on_skip=None,
     ) -> JobResult | None:
         if job_id is not None:
@@ -167,6 +170,7 @@ class HttpJobRunner:
             agent_id=self.agent_id,
             max_pending_age_seconds=max_pending_age_seconds,
             lease_seconds=self.lease_seconds,
+            max_claim_attempts=max_claim_attempts,
         )
         for skipped in claim.get("skipped", []):
             if on_skip is not None:

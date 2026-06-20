@@ -46,12 +46,14 @@ class FakeClient:
         agent_id: str,
         max_pending_age_seconds: int | None = 300,
         lease_seconds: int = 60,
+        max_claim_attempts: int = 3,
     ) -> dict:
         self.claim_args.append(
             {
                 "agent_id": agent_id,
                 "max_pending_age_seconds": max_pending_age_seconds,
                 "lease_seconds": lease_seconds,
+                "max_claim_attempts": max_claim_attempts,
             }
         )
         return self.claim_response
@@ -157,6 +159,7 @@ def test_http_job_runner_claims_collects_and_reports_done(tmp_path: Path) -> Non
     assert result.status == "DONE"
     assert collector.calls == 1
     assert client.claim_args[0]["lease_seconds"] == 60
+    assert client.claim_args[0]["max_claim_attempts"] == 3
     assert client.uploaded[0]["job_id"] == "job-1"
     assert client.uploaded[0]["lease_token"] == "lease-1"
     assert client.uploaded[0]["artifacts"]["flamegraph"].endswith("flamegraph.svg")

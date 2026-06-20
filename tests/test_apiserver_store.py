@@ -61,6 +61,7 @@ def test_claim_pending_job_marks_job_running_and_records_agent(tmp_path: Path) -
     assert claim["job"]["job_id"] == pending["job_id"]
     assert claim["job"]["status"] == "RUNNING"
     assert claim["job"]["claimed_by"] == "agent-1"
+    assert claim["job"]["claim_attempts"] == 1
     assert claim["job"]["lease_token"]
     assert claim["job"]["lease_expires_at"] is not None
     assert store.get_job(pending["job_id"])["status"] == "RUNNING"
@@ -237,6 +238,31 @@ def test_requeue_expired_leases_moves_running_job_back_to_pending(tmp_path: Path
     assert [event["status"] for event in store.get_events(pending["job_id"])] == ["PENDING", "RUNNING", "PENDING"]
 
 
+def test_requeue_expired_lease_fails_job_after_claim_attempt_limit(tmp_path: Path) -> None:
+    store = ServerJobStore(str(tmp_path))
+    pending = store.create_job(pid=1234, duration_seconds=10, sample_frequency=99)
+    claimed = store.claim_pending_job(agent_id="agent-1", lease_seconds=60, max_claim_attempts=1)["job"]
+    claimed["lease_expires_at"] = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
+    store._write_json_atomic(tmp_path / "jobs" / pending["job_id"] / "job.json", claimed)
+
+    skipped = store.requeue_expired_leases(max_claim_attempts=1)
+
+    assert skipped == [
+        {
+            "job_id": pending["job_id"],
+            "reason": "job claim attempts exhausted after lease expiration",
+            "error_message": "job was claimed 1 time(s); max allowed is 1",
+            "status": "FAILED",
+        }
+    ]
+    job = store.get_job(pending["job_id"])
+    assert job["status"] == "FAILED"
+    assert job["previous_claimed_by"] == "agent-1"
+    assert job["lease_token"] is None
+    assert job["lease_expires_at"] is None
+    assert [event["status"] for event in store.get_events(pending["job_id"])] == ["PENDING", "RUNNING", "FAILED"]
+
+
 def test_claim_pending_job_requeues_expired_lease_before_claiming_next_job(tmp_path: Path) -> None:
     store = ServerJobStore(str(tmp_path))
     first = store.create_job(pid=1001, duration_seconds=10, sample_frequency=99)
@@ -249,6 +275,7 @@ def test_claim_pending_job_requeues_expired_lease_before_claiming_next_job(tmp_p
 
     assert claim["job"]["job_id"] == first["job_id"]
     assert claim["job"]["claimed_by"] == "agent-2"
+    assert claim["job"]["claim_attempts"] == 2
     assert claim["skipped"][0]["reason"] == "job lease expired before completion"
     assert store.get_job(second["job_id"])["status"] == "PENDING"
 

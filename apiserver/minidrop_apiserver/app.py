@@ -30,6 +30,7 @@ class AgentHeartbeatRequest(BaseModel):
 class ClaimJobRequest(BaseModel):
     max_pending_age_seconds: int | None = Field(default=300, ge=0)
     lease_seconds: int = Field(default=60, gt=0)
+    max_claim_attempts: int = Field(default=3, gt=0)
 
 
 class RenewLeaseRequest(BaseModel):
@@ -146,6 +147,7 @@ def create_app(runtime_dir: str | None = None, process_inspector: ProcessInspect
             agent_id=agent_id,
             max_pending_age_seconds=request.max_pending_age_seconds,
             lease_seconds=request.lease_seconds,
+            max_claim_attempts=request.max_claim_attempts,
         )
 
     @app.post("/api/agents/{agent_id}/jobs/{job_id}/lease")
