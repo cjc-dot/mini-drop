@@ -5,6 +5,7 @@ import json
 
 from .daemon import AgentDaemon
 from .heartbeat import HeartbeatClient, result_to_dict
+from .http_jobs import HttpJobRunner
 from .job import JobSpec
 from .runner import LocalAgent
 
@@ -62,6 +63,7 @@ def build_parser() -> argparse.ArgumentParser:
     daemon.add_argument("--max-pending-age", default=300, type=_non_negative_int)
     daemon.add_argument("--disable-pid-check", action="store_true")
     daemon.add_argument("--version", default="0.1.0")
+    daemon.add_argument("--job-source", default="local", choices=["local", "server"])
 
     return parser
 
@@ -112,6 +114,13 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "daemon":
+        pending_agent = None
+        if args.job_source == "server":
+            pending_agent = HttpJobRunner(
+                runtime_dir=args.runtime_dir,
+                server_url=args.server_url,
+                agent_id=args.agent_id,
+            )
         daemon = AgentDaemon(
             runtime_dir=args.runtime_dir,
             server_url=args.server_url,
@@ -121,6 +130,7 @@ def main(argv: list[str] | None = None) -> int:
             max_pending_age_seconds=args.max_pending_age or None,
             validate_pid=not args.disable_pid_check,
             version=args.version,
+            agent=pending_agent,
             on_job_result=lambda result: print(f"Job {result.job_id} finished with status {result.status}", flush=True),
             on_job_skip=_print_skip,
         )

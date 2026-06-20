@@ -17,6 +17,7 @@ POLL_INTERVAL ?= 2
 MAX_JOBS ?= 0
 MAX_PENDING_AGE ?= 300
 DISABLE_PID_CHECK ?= 0
+JOB_SOURCE ?= server
 
 .PHONY: init build-workload collect agent-run agent-run-pending agent-heartbeat agent-daemon api-run test clean-runtime demo agent-demo
 
@@ -68,6 +69,7 @@ agent-daemon:
 		--runtime-dir $(MINIDROP_RUNTIME) \
 		--server-url http://$(API_HOST):$(API_PORT) \
 		--agent-id $(AGENT_ID) \
+		--job-source $(JOB_SOURCE) \
 		--heartbeat-interval $(HEARTBEAT_INTERVAL) \
 		--poll-interval $(POLL_INTERVAL) \
 		--max-jobs $(MAX_JOBS) \

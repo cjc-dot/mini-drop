@@ -27,6 +27,17 @@ class AgentHeartbeatRequest(BaseModel):
     version: str = Field(default="0.1.0", min_length=1)
 
 
+class ClaimJobRequest(BaseModel):
+    max_pending_age_seconds: int | None = Field(default=300, ge=0)
+
+
+class FinishJobRequest(BaseModel):
+    status: Literal["DONE", "FAILED"]
+    artifacts: dict[str, str] = Field(default_factory=dict)
+    error_message: str | None = None
+    reason: str | None = None
+
+
 def create_app(runtime_dir: str | None = None, process_inspector: ProcessInspector | None = None) -> FastAPI:
     resolved_runtime_dir = runtime_dir or os.environ.get("MINIDROP_RUNTIME", "~/mini-drop-runtime")
     runtime_root = Path(resolved_runtime_dir).expanduser().resolve()
@@ -115,6 +126,31 @@ def create_app(runtime_dir: str | None = None, process_inspector: ProcessInspect
             pid=request.pid,
             version=request.version,
         )
+
+    @app.post("/api/agents/{agent_id}/jobs/claim")
+    def claim_job(agent_id: str, request: ClaimJobRequest) -> dict:
+        return store.claim_pending_job(
+            agent_id=agent_id,
+            max_pending_age_seconds=request.max_pending_age_seconds,
+        )
+
+    @app.post("/api/agents/{agent_id}/jobs/{job_id}/finish")
+    def finish_job(agent_id: str, job_id: str, request: FinishJobRequest) -> dict:
+        try:
+            return store.finish_claimed_job(
+                agent_id=agent_id,
+                job_id=job_id,
+                status=request.status,
+                artifacts=request.artifacts,
+                error_message=request.error_message,
+                reason=request.reason,
+            )
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="job not found") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @app.get("/api/agents")
     def list_agents(offline_after_seconds: int = 30) -> list[dict]:
