@@ -6,13 +6,14 @@ SEVERITY_ORDER = {"OK": 0, "INFO": 1, "LOW": 2, "MEDIUM": 3, "HIGH": 4}
 
 def build_attribution_report(diagnostic_report: dict) -> dict:
     """Build deterministic root-cause claims from an existing diagnostic report."""
+    base_claims = _deduplicate_claims(
+        [
+            *_claims_from_findings(diagnostic_report),
+            *_claims_from_sections(diagnostic_report),
+        ]
+    )
     claims = _score_claims(
-        _deduplicate_claims(
-            [
-                *_claims_from_findings(diagnostic_report),
-                *_claims_from_sections(diagnostic_report),
-            ]
-        ),
+        _deduplicate_claims([*base_claims, *_fusion_claims(base_claims)]),
         diagnostic_report,
     )
     severity = _overall_severity(claims)
@@ -27,6 +28,7 @@ def build_attribution_report(diagnostic_report: dict) -> dict:
             "description": "Claims are ranked by severity, confidence_score, and evidence_count.",
             "score_range": "0-100",
         },
+        "related_evidence_jobs": diagnostic_report.get("related_evidence_jobs", []),
         "claims": claims,
     }
 
@@ -40,18 +42,19 @@ def _claims_from_findings(report: dict) -> list[dict]:
         if not isinstance(finding, dict):
             continue
         rule_id = str(finding.get("rule_id") or "")
+        source = str(finding.get("source") or "suggestions")
         if rule_id == "cpu_self_hotspot":
-            claims.append(_cpu_hotspot_claim(finding, source="suggestions"))
+            claims.append(_cpu_hotspot_claim(finding, source=source))
         elif rule_id == "python_self_hotspot":
-            claims.append(_python_hotspot_claim(finding, source="suggestions"))
-        elif rule_id in {"high_read_syscall_rate", "high_write_syscall_rate"}:
-            claims.append(_syscall_rate_claim(finding, source="suggestions"))
+            claims.append(_python_hotspot_claim(finding, source=source))
+        elif rule_id in {"high_read_syscall_rate", "high_write_syscall_rate", "write_syscall_dominates_read"}:
+            claims.append(_syscall_rate_claim(finding, source=source))
         elif rule_id in {
             "io_latency_tail_over_1ms",
             "io_latency_p99_far_from_p50",
             "io_latency_bimodal_distribution",
         }:
-            claims.append(_io_latency_claim(finding, source="suggestions"))
+            claims.append(_io_latency_claim(finding, source=source))
         elif rule_id in {"latency_regressed_vs_baseline", "io_latency_regressed_vs_baseline"}:
             claims.append(_baseline_regression_claim(finding, source="baseline_diff"))
     return [claim for claim in claims if claim]
@@ -353,6 +356,172 @@ def _claims_from_baseline_section(items: list[dict]) -> list[dict]:
     return claims
 
 
+def _fusion_claims(claims: list[dict]) -> list[dict]:
+    cpu_claim = _first_claim(claims, ("cpu_hotspot:", "python_hotspot:"))
+    syscall_claim = _first_claim(claims, ("syscall_rate:",))
+    latency_claim = _first_claim(claims, ("io_latency:",))
+    baseline_claim = _first_claim(claims, ("baseline_regression:",))
+    fused: list[dict] = []
+
+    if cpu_claim and syscall_claim and latency_claim:
+        cpu_target = _claim_target(cpu_claim)
+        syscall_target = _claim_target(syscall_claim)
+        latency_target = _claim_target(latency_claim)
+        fused.append(
+            _combined_claim(
+                claim_id="combined:cpu_hotspot_with_syscall_and_io_latency",
+                title="CPU 热点可能伴随高频系统调用和 IO 延迟",
+                root_cause=(
+                    f"{cpu_target} 是主要用户态热点，同时 {syscall_target} 系统调用频率偏高，"
+                    f"{latency_target} IO 延迟也存在异常信号。优先怀疑热点路径附近存在高频小块 IO、"
+                    "同步等待或计算与 IO 交织导致的性能下降。"
+                ),
+                severity=_max_claim_severity([cpu_claim, syscall_claim, latency_claim]),
+                confidence="HIGH",
+                source_claims=[cpu_claim, syscall_claim, latency_claim],
+                next_actions=[
+                    f"从 {cpu_target} 的源码向外追踪，确认是否直接或间接触发 {syscall_target}。",
+                    "检查热点循环内是否存在小块 read/write、flush、日志输出或同步等待。",
+                    "分别优化计算路径和 IO 路径后重新采样，确认 CPU 与 IO 信号是否同步下降。",
+                ],
+            )
+        )
+        return fused
+
+    if cpu_claim and syscall_claim:
+        cpu_target = _claim_target(cpu_claim)
+        syscall_target = _claim_target(syscall_claim)
+        fused.append(
+            _combined_claim(
+                claim_id="combined:cpu_hotspot_with_syscall_pressure",
+                title="CPU 热点可能伴随高频系统调用",
+                root_cause=(
+                    f"{cpu_target} 是主要用户态热点，同时 {syscall_target} 系统调用频率偏高。"
+                    "这通常提示热点路径可能存在循环内频繁读写、日志输出或过细粒度的系统调用。"
+                ),
+                severity=_max_claim_severity([cpu_claim, syscall_claim]),
+                confidence="MEDIUM",
+                source_claims=[cpu_claim, syscall_claim],
+                next_actions=[
+                    f"检查 {cpu_target} 附近是否存在循环内 {syscall_target} 调用。",
+                    "统计单次系统调用处理的数据量，判断是否可以合并为批量操作。",
+                ],
+            )
+        )
+
+    if cpu_claim and latency_claim:
+        cpu_target = _claim_target(cpu_claim)
+        latency_target = _claim_target(latency_claim)
+        fused.append(
+            _combined_claim(
+                claim_id="combined:cpu_hotspot_with_io_latency",
+                title="CPU 热点可能伴随 IO 延迟长尾",
+                root_cause=(
+                    f"{cpu_target} 是主要用户态热点，同时 {latency_target} IO 延迟存在长尾。"
+                    "这可能说明热点路径中存在阻塞 IO、同步等待，或者计算热点被慢 IO 放大。"
+                ),
+                severity=_max_claim_severity([cpu_claim, latency_claim]),
+                confidence="MEDIUM",
+                source_claims=[cpu_claim, latency_claim],
+                next_actions=[
+                    f"确认 {cpu_target} 是否处在 {latency_target} IO 的调用链附近。",
+                    "尝试将同步 IO 改为缓冲、批量或异步处理后复测。",
+                ],
+            )
+        )
+
+    if baseline_claim and latency_claim:
+        baseline_target = _claim_target(baseline_claim)
+        fused.append(
+            _combined_claim(
+                claim_id="combined:latency_regression_with_current_io_tail",
+                title="IO 退化和当前延迟长尾互相印证",
+                root_cause=(
+                    f"{baseline_target} 相比基线出现退化，同时当前 IO 延迟分布也有长尾信号。"
+                    "这说明该问题更可能是近期变更、输入变化或运行环境变化带来的真实退化，而不是单次偶发样本。"
+                ),
+                severity=_max_claim_severity([baseline_claim, latency_claim]),
+                confidence="HIGH",
+                source_claims=[baseline_claim, latency_claim],
+                next_actions=[
+                    "确认 baseline 与 current 的输入、采样时长、运行环境保持一致。",
+                    "对近期代码改动做二分或回退验证，确认退化引入点。",
+                ],
+            )
+        )
+
+    return fused
+
+
+def _combined_claim(
+    claim_id: str,
+    title: str,
+    root_cause: str,
+    severity: str,
+    confidence: str,
+    source_claims: list[dict],
+    next_actions: list[str],
+) -> dict:
+    claim = _claim(
+        claim_id=claim_id,
+        title=title,
+        root_cause=root_cause,
+        severity=severity,
+        confidence=confidence,
+        evidence=_combined_evidence(source_claims),
+        next_actions=next_actions,
+    )
+    claim["claim_type"] = "fusion"
+    claim["fused_claims"] = [source.get("claim_id", "-") for source in source_claims]
+    return claim
+
+
+def _combined_evidence(source_claims: list[dict]) -> list[dict]:
+    evidence: list[dict] = []
+    for source in source_claims:
+        evidence.append(
+            _evidence(
+                evidence_id=f"claim:{source.get('claim_id', '-')}",
+                source="attribution_claim",
+                summary=(
+                    f"{source.get('title', source.get('claim_id', '-'))} "
+                    f"({source.get('severity', 'INFO')}/{source.get('confidence', 'LOW')})"
+                ),
+                data={
+                    "claim_id": source.get("claim_id"),
+                    "severity": source.get("severity"),
+                    "confidence": source.get("confidence"),
+                },
+            )
+        )
+        source_evidence = source.get("evidence", [])
+        if isinstance(source_evidence, list) and source_evidence:
+            evidence.append(source_evidence[0])
+    return evidence
+
+
+def _first_claim(claims: list[dict], prefixes: tuple[str, ...]) -> dict | None:
+    for claim in claims:
+        claim_id = str(claim.get("claim_id", ""))
+        if claim_id.startswith(prefixes):
+            return claim
+    return None
+
+
+def _claim_target(claim: dict) -> str:
+    claim_id = str(claim.get("claim_id", ""))
+    if ":" not in claim_id:
+        return claim.get("title") or "unknown"
+    return claim_id.split(":", 1)[1].split(":", 1)[0] or "unknown"
+
+
+def _max_claim_severity(claims: list[dict]) -> str:
+    severity = "INFO"
+    for claim in claims:
+        severity = _max_severity(severity, claim.get("severity", "INFO"))
+    return severity
+
+
 def _deduplicate_claims(claims: list[dict]) -> list[dict]:
     merged: dict[str, dict] = {}
     for claim in claims:
@@ -451,7 +620,14 @@ def _claim_rank_key(claim: dict) -> tuple[int, int, int, int]:
 def _missing_evidence(claim: dict, available_sources: set[str]) -> list[str]:
     claim_id = str(claim.get("claim_id", ""))
     missing: list[str] = []
-    if claim_id.startswith("cpu_hotspot:"):
+    if claim_id.startswith("combined:"):
+        fused_claims = claim.get("fused_claims", [])
+        fused_text = " ".join(str(item) for item in fused_claims) if isinstance(fused_claims, list) else ""
+        if "baseline_regression:" not in fused_text and "baseline_diff" not in available_sources:
+            missing.append("缺少基线对比证据，暂时不能判断这个融合根因是长期问题还是近期退化。")
+        if "syscall_rate:" not in fused_text and "ebpf_syscalls" not in available_sources:
+            missing.append("缺少 eBPF syscall 证据，暂时不能判断是否存在系统调用放大。")
+    elif claim_id.startswith("cpu_hotspot:"):
         if "ebpf_syscalls" not in available_sources:
             missing.append("缺少 eBPF syscall 证据，暂时不能判断热点是否伴随高频系统调用。")
         if "ebpf_io_latency" not in available_sources:
