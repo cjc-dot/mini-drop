@@ -48,8 +48,14 @@ def test_build_attribution_report_creates_claims_from_findings_and_sections() ->
     assert "io_latency:read" in claim_ids
     cpu_claim = next(claim for claim in report["claims"] if claim["claim_id"] == "cpu_hotspot:hot_func")
     assert cpu_claim["confidence"] == "HIGH"
+    assert cpu_claim["confidence_score"] >= 80
+    assert cpu_claim["triage_priority"] == "P1"
+    assert cpu_claim["evidence_count"] == 1
+    assert cpu_claim["evidence_sources"] == ["suggestions"]
+    assert cpu_claim["missing_evidence"]
     assert cpu_claim["evidence"][0]["source"] == "suggestions"
     assert cpu_claim["next_actions"]
+    assert report["ranking_policy"]["score_range"] == "0-100"
 
 
 def test_build_attribution_report_handles_report_without_findings() -> None:

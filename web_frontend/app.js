@@ -310,14 +310,22 @@ function renderAttribution(report) {
     ${claims.slice(0, 4).map((claim) => {
       const evidence = Array.isArray(claim.evidence) ? claim.evidence : [];
       const actions = Array.isArray(claim.next_actions) ? claim.next_actions : [];
+      const missingEvidence = Array.isArray(claim.missing_evidence) ? claim.missing_evidence : [];
+      const evidenceSources = Array.isArray(claim.evidence_sources) ? claim.evidence_sources : [];
       return `
         <article class="attribution-card">
           <div class="attribution-head">
             <div>
               <strong>${escapeHtml(claim.title || claim.claim_id || "Root cause claim")}</strong>
               <p>${escapeHtml(claim.root_cause || "-")}</p>
+              <p class="attribution-meta">
+                ${escapeHtml(claim.triage_priority || "P4")} · score ${escapeHtml(claim.confidence_score ?? "-")} ·
+                ${escapeHtml(claim.evidence_count ?? evidence.length)} evidence ·
+                ${escapeHtml(evidenceSources.join(", ") || "no source")}
+              </p>
             </div>
             <div class="attribution-badges">
+              <span class="badge priority">${escapeHtml(claim.triage_priority || "P4")}</span>
               <span class="badge ${escapeHtml(String(claim.severity || "INFO").toLowerCase())}">${escapeHtml(claim.severity || "INFO")}</span>
               <span class="badge confidence">${escapeHtml(claim.confidence || "LOW")}</span>
             </div>
@@ -333,6 +341,12 @@ function renderAttribution(report) {
                   </li>
                 `).join("")}
               </ul>
+            </div>
+          ` : ""}
+          ${missingEvidence.length ? `
+            <div class="attribution-missing">
+              <h4>Missing Evidence</h4>
+              <ul>${missingEvidence.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
             </div>
           ` : ""}
           ${actions.length ? `

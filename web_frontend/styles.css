@@ -287,6 +287,11 @@ tr.selected-row .link-button {
   color: #334155;
 }
 
+.badge.priority {
+  background: #e0f2fe;
+  color: #075985;
+}
+
 .empty {
   color: var(--muted);
   text-align: center;
@@ -504,6 +509,12 @@ a {
   line-height: 1.5;
 }
 
+.attribution-head .attribution-meta {
+  margin-top: 6px;
+  font-family: Consolas, Monaco, monospace;
+  font-size: 12px;
+}
+
 .attribution-badges {
   display: flex;
   gap: 6px;
@@ -511,18 +522,21 @@ a {
 }
 
 .attribution-evidence h4,
+.attribution-missing h4,
 .attribution-actions h4 {
   margin: 0 0 6px;
   font-size: 13px;
 }
 
 .attribution-evidence ul,
+.attribution-missing ul,
 .attribution-actions ol {
   margin: 0 0 0 20px;
   padding: 0;
 }
 
 .attribution-evidence li,
+.attribution-missing li,
 .attribution-actions li {
   margin: 4px 0;
   line-height: 1.45;
@@ -533,6 +547,10 @@ a {
   margin-right: 6px;
   color: var(--muted);
   font-size: 12px;
+}
+
+.attribution-missing {
+  color: var(--orange);
 }
 
 .compact-table {

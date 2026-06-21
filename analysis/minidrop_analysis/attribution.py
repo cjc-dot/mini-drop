@@ -6,11 +6,14 @@ SEVERITY_ORDER = {"OK": 0, "INFO": 1, "LOW": 2, "MEDIUM": 3, "HIGH": 4}
 
 def build_attribution_report(diagnostic_report: dict) -> dict:
     """Build deterministic root-cause claims from an existing diagnostic report."""
-    claims = _deduplicate_claims(
-        [
-            *_claims_from_findings(diagnostic_report),
-            *_claims_from_sections(diagnostic_report),
-        ]
+    claims = _score_claims(
+        _deduplicate_claims(
+            [
+                *_claims_from_findings(diagnostic_report),
+                *_claims_from_sections(diagnostic_report),
+            ]
+        ),
+        diagnostic_report,
     )
     severity = _overall_severity(claims)
     return {
@@ -20,6 +23,10 @@ def build_attribution_report(diagnostic_report: dict) -> dict:
         "severity": severity,
         "claim_count": len(claims),
         "summary": _summary(claims, severity),
+        "ranking_policy": {
+            "description": "Claims are ranked by severity, confidence_score, and evidence_count.",
+            "score_range": "0-100",
+        },
         "claims": claims,
     }
 
@@ -363,6 +370,107 @@ def _deduplicate_claims(claims: list[dict]) -> list[dict]:
         key=lambda item: (SEVERITY_ORDER.get(item.get("severity", "INFO"), 1), len(item.get("evidence", []))),
         reverse=True,
     )
+
+
+def _score_claims(claims: list[dict], diagnostic_report: dict) -> list[dict]:
+    available_sources = _available_sources(diagnostic_report)
+    scored: list[dict] = []
+    for claim in claims:
+        evidence = claim.get("evidence", []) if isinstance(claim.get("evidence"), list) else []
+        evidence_sources = _deduplicate(
+            [
+                str(item.get("source"))
+                for item in evidence
+                if isinstance(item, dict) and item.get("source")
+            ]
+        )
+        confidence_score = _confidence_score(claim, evidence_count=len(evidence), evidence_sources=evidence_sources)
+        enriched = dict(claim)
+        enriched["confidence_score"] = confidence_score
+        enriched["triage_priority"] = _triage_priority(claim.get("severity", "INFO"), confidence_score)
+        enriched["evidence_count"] = len(evidence)
+        enriched["evidence_sources"] = evidence_sources
+        enriched["missing_evidence"] = _missing_evidence(claim, available_sources)
+        scored.append(enriched)
+    return sorted(scored, key=_claim_rank_key, reverse=True)
+
+
+def _available_sources(report: dict) -> set[str]:
+    sources: set[str] = set()
+    sections = report.get("sections", [])
+    if isinstance(sections, list):
+        for section in sections:
+            if isinstance(section, dict) and section.get("section_id"):
+                sources.add(str(section["section_id"]))
+    findings = report.get("findings", [])
+    if isinstance(findings, list):
+        for finding in findings:
+            if isinstance(finding, dict) and finding.get("source"):
+                sources.add(str(finding["source"]))
+    return sources
+
+
+def _confidence_score(claim: dict, evidence_count: int, evidence_sources: list[str]) -> int:
+    severity_score = {
+        "HIGH": 45,
+        "MEDIUM": 30,
+        "LOW": 18,
+        "INFO": 8,
+        "OK": 0,
+    }.get(claim.get("severity", "INFO"), 8)
+    confidence_score = {
+        "HIGH": 30,
+        "MEDIUM": 20,
+        "LOW": 10,
+    }.get(claim.get("confidence", "LOW"), 10)
+    evidence_score = min(15, evidence_count * 6)
+    source_score = min(10, len(evidence_sources) * 5)
+    return min(100, severity_score + confidence_score + evidence_score + source_score)
+
+
+def _triage_priority(severity: str, confidence_score: int) -> str:
+    if severity == "HIGH" and confidence_score >= 80:
+        return "P1"
+    if severity in {"HIGH", "MEDIUM"} and confidence_score >= 60:
+        return "P2"
+    if confidence_score >= 40:
+        return "P3"
+    return "P4"
+
+
+def _claim_rank_key(claim: dict) -> tuple[int, int, int, int]:
+    priority_order = {"P1": 4, "P2": 3, "P3": 2, "P4": 1}
+    return (
+        priority_order.get(claim.get("triage_priority", "P4"), 1),
+        SEVERITY_ORDER.get(claim.get("severity", "INFO"), 1),
+        int(claim.get("confidence_score", 0)),
+        int(claim.get("evidence_count", 0)),
+    )
+
+
+def _missing_evidence(claim: dict, available_sources: set[str]) -> list[str]:
+    claim_id = str(claim.get("claim_id", ""))
+    missing: list[str] = []
+    if claim_id.startswith("cpu_hotspot:"):
+        if "ebpf_syscalls" not in available_sources:
+            missing.append("缺少 eBPF syscall 证据，暂时不能判断热点是否伴随高频系统调用。")
+        if "ebpf_io_latency" not in available_sources:
+            missing.append("缺少 eBPF IO 延迟证据，暂时不能判断热点是否受到阻塞 IO 放大。")
+    elif claim_id.startswith("io_latency:"):
+        if "cpu_hotspots" not in available_sources and "python_profile" not in available_sources:
+            missing.append("缺少 CPU 或 Python 热点证据，暂时不能判断慢 IO 是否也造成用户态计算热点。")
+        if "baseline_diff" not in available_sources:
+            missing.append("缺少基线对比证据，暂时不能判断这是长期问题还是本次退化。")
+    elif claim_id.startswith("syscall_rate:"):
+        if "cpu_hotspots" not in available_sources and "python_profile" not in available_sources:
+            missing.append("缺少用户态热点证据，暂时不能定位高频系统调用来自哪段业务代码。")
+    elif claim_id.startswith("python_hotspot:"):
+        if "cpu_hotspots" not in available_sources:
+            missing.append("缺少 perf CPU 热点证据，暂时不能和内核采样结果互相验证。")
+    elif claim_id.startswith("baseline_regression:"):
+        if "ebpf_io_latency" not in available_sources:
+            missing.append("缺少当前 eBPF IO 延迟分布，退化原因还需要结合原始延迟样本确认。")
+    return missing[:3]
 
 
 def _claim(

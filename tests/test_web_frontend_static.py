@@ -76,6 +76,9 @@ def test_web_frontend_contains_job_report_panel() -> None:
     assert "renderLatencyDiff" in app_js
     assert "renderDiagnosticReport" in app_js
     assert "renderAttribution" in app_js
+    assert "confidence_score" in app_js
+    assert "triage_priority" in app_js
+    assert "missing_evidence" in app_js
     assert "renderPyspyProfile" in app_js
     assert "formatSigned" in app_js
 
@@ -95,6 +98,8 @@ def test_web_frontend_contains_latency_chart_styles() -> None:
     assert ".diagnosis-grid" in styles
     assert ".attribution-body" in styles
     assert ".attribution-card" in styles
+    assert ".badge.priority" in styles
+    assert ".attribution-missing" in styles
 
 
 def test_web_ui_route_serves_index(tmp_path: Path) -> None:
