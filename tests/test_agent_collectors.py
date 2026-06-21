@@ -9,6 +9,14 @@ def test_build_collector_returns_perf_collector() -> None:
     assert isinstance(build_collector("perf"), PerfCollector)
 
 
+def test_perf_collector_can_use_environment_perf_binary(monkeypatch) -> None:
+    monkeypatch.setenv("MINIDROP_PERF_BIN", "/usr/lib/linux-tools-test/perf")
+
+    collector = PerfCollector()
+
+    assert collector.perf_bin == "/usr/lib/linux-tools-test/perf"
+
+
 def test_build_collector_returns_ebpf_syscall_collector() -> None:
     assert isinstance(build_collector("ebpf_syscall"), EbpfSyscallCollector)
 

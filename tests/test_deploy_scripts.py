@@ -25,3 +25,53 @@ def test_tool_check_script_checks_perf_and_bpftrace_nopasswd() -> None:
     assert "check_command bpftrace" in script
     assert "check_command py-spy" in script
     assert "sudo -n" in script
+
+
+def test_docker_compose_defines_api_and_privileged_agent_services() -> None:
+    root = Path(__file__).resolve().parents[1]
+    compose = (root / "docker-compose.yml").read_text(encoding="utf-8")
+
+    assert "apiserver:" in compose
+    assert "agent:" in compose
+    assert "mini-drop-runtime:" in compose
+    assert "network_mode: host" in compose
+    assert "pid: host" in compose
+    assert "privileged: true" in compose
+    assert "${HOST_PERF_BIN:-/usr/bin/perf}:/opt/minidrop-tools/perf:ro" in compose
+    assert "MINIDROP_PERF_BIN: /opt/minidrop-tools/perf" in compose
+    assert "minidrop_apiserver" in compose
+    assert "minidrop_agent" in compose
+    assert "/api/health" in compose
+
+
+def test_dockerfile_installs_runtime_tools_and_copies_project_modules() -> None:
+    root = Path(__file__).resolve().parents[1]
+    dockerfile = (root / "Dockerfile").read_text(encoding="utf-8")
+
+    assert "FROM ubuntu:22.04" in dockerfile
+    assert "bpftrace" in dockerfile
+    assert "libpython3.10" in dockerfile
+    assert "libtraceevent1" in dockerfile
+    assert "linux-tools-generic" in dockerfile
+    assert "python3 -m pip install -r requirements.txt" in dockerfile
+    assert "COPY analysis ./analysis" in dockerfile
+    assert "COPY apiserver ./apiserver" in dockerfile
+    assert "COPY drop ./drop" in dockerfile
+    assert "COPY web_frontend ./web_frontend" in dockerfile
+
+
+def test_makefile_exposes_compose_targets() -> None:
+    root = Path(__file__).resolve().parents[1]
+    makefile = (root / "Makefile").read_text(encoding="utf-8")
+
+    assert "compose-up:" in makefile
+    assert "HOST_KERNEL ?= $(shell uname -r)" in makefile
+    assert "HOST_PERF_BIN ?=" in makefile
+    assert "/usr/lib/linux-tools-$(HOST_KERNEL)/perf" in makefile
+    assert "/usr/lib/linux-tools/$(HOST_KERNEL)/perf" in makefile
+    assert "compose-config:" in makefile
+    assert "HOST_KERNEL=$(HOST_KERNEL) HOST_PERF_BIN=$(HOST_PERF_BIN) docker compose config" in makefile
+    assert "HOST_KERNEL=$(HOST_KERNEL) HOST_PERF_BIN=$(HOST_PERF_BIN) docker compose up --build" in makefile
+    assert "compose-down:" in makefile
+    assert "HOST_KERNEL=$(HOST_KERNEL) HOST_PERF_BIN=$(HOST_PERF_BIN) docker compose down" in makefile
+    assert "compose-logs:" in makefile

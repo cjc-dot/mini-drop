@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 
 from .ebpf import EbpfSyscallCollector
@@ -28,7 +29,7 @@ def build_parser() -> argparse.ArgumentParser:
     collect.add_argument("--frequency", default=99, type=_positive_int)
     collect.add_argument("--output", required=True)
     collect.add_argument("--collector", default="perf", choices=["perf", "ebpf_syscall", "ebpf_io_latency", "py_spy"])
-    collect.add_argument("--perf-bin", default="perf")
+    collect.add_argument("--perf-bin", default=os.environ.get("MINIDROP_PERF_BIN", "perf"))
     collect.add_argument("--bpftrace-bin", default="bpftrace")
     collect.add_argument("--py-spy-bin", default="py-spy")
 

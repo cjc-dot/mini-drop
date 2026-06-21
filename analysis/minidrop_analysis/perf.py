@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
+import shlex
 import subprocess
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -37,8 +40,8 @@ class ProfileSummary:
 
 
 class PerfCollector:
-    def __init__(self, perf_bin: str = "perf") -> None:
-        self.perf_bin = perf_bin
+    def __init__(self, perf_bin: str | None = None) -> None:
+        self.perf_bin = perf_bin or os.environ.get("MINIDROP_PERF_BIN", "perf")
 
     def collect(self, pid: int, duration_seconds: int, sample_frequency: int, output_dir: str) -> ProfileSummary:
         output_path = Path(output_dir).expanduser().resolve()
@@ -107,9 +110,28 @@ class PerfCollector:
 
     @staticmethod
     def _run(command: list[str]) -> None:
-        subprocess.run(command, check=True)
+        completed = subprocess.run(command, text=True, capture_output=True)
+        if completed.stdout:
+            print(completed.stdout, end="")
+        if completed.stderr:
+            print(completed.stderr, end="", file=sys.stderr)
+        if completed.returncode != 0:
+            raise RuntimeError(_format_command_failure(command, completed))
 
     @staticmethod
     def _capture(command: list[str]) -> str:
-        completed = subprocess.run(command, check=True, text=True, capture_output=True)
+        completed = subprocess.run(command, text=True, capture_output=True)
+        if completed.returncode != 0:
+            raise RuntimeError(_format_command_failure(command, completed))
         return completed.stdout
+
+
+def _format_command_failure(command: list[str], completed: subprocess.CompletedProcess) -> str:
+    parts = [
+        f"command failed with exit code {completed.returncode}: {shlex.join(command)}",
+    ]
+    if completed.stdout:
+        parts.append(f"stdout:\n{completed.stdout.strip()}")
+    if completed.stderr:
+        parts.append(f"stderr:\n{completed.stderr.strip()}")
+    return "\n".join(parts)

@@ -22,7 +22,12 @@ def test_e2e_demo_script_runs_server_agent_and_checks_report() -> None:
     assert "python\" -m minidrop_apiserver" not in script
     assert '"${PYTHON}" -m minidrop_apiserver' in script
     assert '"${PYTHON}" -m minidrop_agent daemon' in script
+    assert "E2E_RUN_AGENT" in script
+    assert "Waiting for external agent" in script
     assert 'STATUS=$(printf' in script
     assert '[[ "${STATUS}" != "DONE" ]]' in script
+    assert "verify_artifact summary" in script
+    assert "verify_artifact flamegraph" in script
+    assert "/api/jobs/${JOB_ID}/artifacts/${artifact_name}" in script
     assert "/api/jobs/${JOB_ID}/report" in script
     assert "jq" not in script

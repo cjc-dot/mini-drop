@@ -1,0 +1,79 @@
+services:
+  apiserver:
+    build:
+      context: .
+    image: mini-drop:local
+    command:
+      - python3
+      - -m
+      - minidrop_apiserver
+      - --host
+      - 0.0.0.0
+      - --port
+      - "${API_PORT:-8000}"
+      - --runtime-dir
+      - /runtime
+    network_mode: host
+    pid: host
+    environment:
+      MINIDROP_RUNTIME: /runtime
+      PYTHONPATH: /app/analysis:/app/drop:/app/apiserver
+    volumes:
+      - mini-drop-runtime:/runtime
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:${API_PORT:-8000}/api/health >/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  agent:
+    image: mini-drop:local
+    build:
+      context: .
+    command:
+      - python3
+      - -m
+      - minidrop_agent
+      - daemon
+      - --runtime-dir
+      - /runtime
+      - --server-url
+      - "http://127.0.0.1:${API_PORT:-8000}"
+      - --agent-id
+      - "${AGENT_ID:-docker-agent}"
+      - --job-source
+      - server
+      - --heartbeat-interval
+      - "5"
+      - --poll-interval
+      - "${POLL_INTERVAL:-1}"
+      - --max-jobs
+      - "0"
+      - --max-pending-age
+      - "${MAX_PENDING_AGE:-300}"
+      - --max-claim-attempts
+      - "${MAX_CLAIM_ATTEMPTS:-3}"
+      - --lease-seconds
+      - "${LEASE_SECONDS:-60}"
+    depends_on:
+      apiserver:
+        condition: service_healthy
+    network_mode: host
+    pid: host
+    privileged: true
+    cap_add:
+      - SYS_ADMIN
+      - SYS_PTRACE
+      - PERFMON
+    security_opt:
+      - apparmor:unconfined
+    environment:
+      MINIDROP_RUNTIME: /runtime
+      MINIDROP_PERF_BIN: /opt/minidrop-tools/perf
+      PYTHONPATH: /app/analysis:/app/drop:/app/apiserver
+    volumes:
+      - mini-drop-runtime:/runtime
+      - ${HOST_PERF_BIN:-/usr/bin/perf}:/opt/minidrop-tools/perf:ro
+
+volumes:
+  mini-drop-runtime:

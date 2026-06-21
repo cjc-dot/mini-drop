@@ -11,6 +11,7 @@ DURATION=${DURATION:-5}
 FREQUENCY=${FREQUENCY:-99}
 COLLECTOR=${COLLECTOR:-perf}
 AGENT_ID=${AGENT_ID:-demo-agent}
+E2E_RUN_AGENT=${E2E_RUN_AGENT:-1}
 POLL_INTERVAL=${POLL_INTERVAL:-1}
 LEASE_SECONDS=${LEASE_SECONDS:-60}
 PYTHONPATH=${PYTHONPATH:-"${ROOT_DIR}/analysis:${ROOT_DIR}/drop:${ROOT_DIR}/apiserver"}
@@ -38,9 +39,51 @@ health_check() {
   curl -fsS "${SERVER_URL}/api/health" >/dev/null 2>&1
 }
 
+job_status() {
+  curl -fsS "${SERVER_URL}/api/jobs/${JOB_ID}" | json_get 'data["status"]'
+}
+
+wait_for_done() {
+  local status
+  for _ in $(seq 1 180); do
+    status=$(job_status)
+    case "${status}" in
+      DONE)
+        return 0
+        ;;
+      FAILED)
+        echo "job ${JOB_ID} failed"
+        curl -fsS "${SERVER_URL}/api/jobs/${JOB_ID}" || true
+        return 1
+        ;;
+    esac
+    sleep 1
+  done
+  echo "timed out waiting for job ${JOB_ID}"
+  curl -fsS "${SERVER_URL}/api/jobs/${JOB_ID}" || true
+  return 1
+}
+
+verify_artifact() {
+  local artifact_name=$1
+  local output_file="${MINIDROP_RUNTIME}/tmp/e2e_${JOB_ID}_${artifact_name}"
+  local http_code
+  http_code=$(
+    curl -fsS \
+      -o "${output_file}" \
+      -w "%{http_code}" \
+      "${SERVER_URL}/api/jobs/${JOB_ID}/artifacts/${artifact_name}"
+  )
+  if [[ "${http_code}" != "200" || ! -s "${output_file}" ]]; then
+    echo "artifact ${artifact_name} is not available through API"
+    return 1
+  fi
+}
+
 mkdir -p "${MINIDROP_RUNTIME}/logs"
 mkdir -p "${MINIDROP_RUNTIME}/profiles"
 mkdir -p "${MINIDROP_RUNTIME}/jobs"
+mkdir -p "${MINIDROP_RUNTIME}/tmp"
 
 echo "[1/6] Checking API server at ${SERVER_URL}"
 if health_check; then
@@ -97,18 +140,23 @@ JOB_JSON=$(curl -fsS -X POST "${SERVER_URL}/api/jobs" \
 JOB_ID=$(printf '%s' "${JOB_JSON}" | json_get 'data["job_id"]')
 echo "created job=${JOB_ID}"
 
-echo "[4/6] Running agent until one job completes"
-"${PYTHON}" -m minidrop_agent daemon \
-  --runtime-dir "${MINIDROP_RUNTIME}" \
-  --server-url "${SERVER_URL}" \
-  --agent-id "${AGENT_ID}" \
-  --job-source server \
-  --heartbeat-interval 5 \
-  --poll-interval "${POLL_INTERVAL}" \
-  --max-jobs 1 \
-  --max-pending-age 300 \
-  --max-claim-attempts 3 \
-  --lease-seconds "${LEASE_SECONDS}"
+if [[ "${E2E_RUN_AGENT}" == "1" ]]; then
+  echo "[4/6] Running agent until one job completes"
+  "${PYTHON}" -m minidrop_agent daemon \
+    --runtime-dir "${MINIDROP_RUNTIME}" \
+    --server-url "${SERVER_URL}" \
+    --agent-id "${AGENT_ID}" \
+    --job-source server \
+    --heartbeat-interval 5 \
+    --poll-interval "${POLL_INTERVAL}" \
+    --max-jobs 1 \
+    --max-pending-age 300 \
+    --max-claim-attempts 3 \
+    --lease-seconds "${LEASE_SECONDS}"
+else
+  echo "[4/6] Waiting for external agent to complete the job"
+  wait_for_done
+fi
 
 echo "[5/6] Verifying job status and artifacts"
 FINAL_JOB_JSON=$(curl -fsS "${SERVER_URL}/api/jobs/${JOB_ID}")
@@ -119,21 +167,11 @@ if [[ "${STATUS}" != "DONE" ]]; then
   exit 1
 fi
 
-SUMMARY_PATH=$(printf '%s' "${FINAL_JOB_JSON}" | json_get 'data["artifacts"].get("summary", "")')
-if [[ -z "${SUMMARY_PATH}" || ! -f "${SUMMARY_PATH}" ]]; then
-  echo "summary artifact missing for ${JOB_ID}"
-  printf '%s\n' "${FINAL_JOB_JSON}"
-  exit 1
-fi
+verify_artifact summary
 
 if [[ "${COLLECTOR}" == "perf" ]]; then
-  FLAMEGRAPH_PATH=$(printf '%s' "${FINAL_JOB_JSON}" | json_get 'data["artifacts"].get("flamegraph", "")')
-  HOTSPOTS_PATH=$(printf '%s' "${FINAL_JOB_JSON}" | json_get 'data["artifacts"].get("hotspots", "")')
-  if [[ -z "${FLAMEGRAPH_PATH}" || ! -f "${FLAMEGRAPH_PATH}" || -z "${HOTSPOTS_PATH}" || ! -f "${HOTSPOTS_PATH}" ]]; then
-    echo "perf artifacts missing for ${JOB_ID}"
-    printf '%s\n' "${FINAL_JOB_JSON}"
-    exit 1
-  fi
+  verify_artifact flamegraph
+  verify_artifact hotspots
 fi
 
 echo "[6/6] Verifying diagnostic report"

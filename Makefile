@@ -21,11 +21,13 @@ MAX_CLAIM_ATTEMPTS ?= 3
 DISABLE_PID_CHECK ?= 0
 JOB_SOURCE ?= server
 LEASE_SECONDS ?= 60
+HOST_KERNEL ?= $(shell uname -r)
+HOST_PERF_BIN ?= $(shell if [ -x /usr/lib/linux-tools-$(HOST_KERNEL)/perf ]; then echo /usr/lib/linux-tools-$(HOST_KERNEL)/perf; elif [ -x /usr/lib/linux-tools/$(HOST_KERNEL)/perf ]; then echo /usr/lib/linux-tools/$(HOST_KERNEL)/perf; else command -v perf; fi)
 BASELINE ?=
 CURRENT ?=
 DIFF_OUTPUT ?= $(MINIDROP_RUNTIME)/profiles/ebpf-latency-diff.json
 
-.PHONY: init check-tools setup-sudoers build-workload build-io-workload build-latency-workload collect latency-diff agent-run agent-run-pending agent-heartbeat agent-daemon api-run api-maintenance test integration-test clean-runtime demo e2e-demo agent-demo python-demo
+.PHONY: init check-tools setup-sudoers build-workload build-io-workload build-latency-workload collect latency-diff agent-run agent-run-pending agent-heartbeat agent-daemon api-run api-maintenance test integration-test compose-config compose-up compose-down compose-logs clean-runtime demo e2e-demo agent-demo python-demo
 
 init:
 	mkdir -p $(MINIDROP_RUNTIME)/builds
@@ -167,6 +169,18 @@ test:
 
 integration-test:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m pytest tests/test_e2e_flows.py
+
+compose-config:
+	HOST_KERNEL=$(HOST_KERNEL) HOST_PERF_BIN=$(HOST_PERF_BIN) docker compose config
+
+compose-up:
+	HOST_KERNEL=$(HOST_KERNEL) HOST_PERF_BIN=$(HOST_PERF_BIN) docker compose up --build
+
+compose-down:
+	HOST_KERNEL=$(HOST_KERNEL) HOST_PERF_BIN=$(HOST_PERF_BIN) docker compose down
+
+compose-logs:
+	HOST_KERNEL=$(HOST_KERNEL) HOST_PERF_BIN=$(HOST_PERF_BIN) docker compose logs -f
 
 clean-runtime:
 	rm -rf $(MINIDROP_RUNTIME)/profiles/demo
