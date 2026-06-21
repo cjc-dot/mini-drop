@@ -29,8 +29,11 @@ REQUIRE_DOCKER ?= 0
 BASELINE ?=
 CURRENT ?=
 DIFF_OUTPUT ?= $(MINIDROP_RUNTIME)/profiles/ebpf-latency-diff.json
+BASELINE_DELAY_US ?= 50
+CURRENT_DELAY_US ?= 2000
+EBPF_DEMO_RUN_AGENT ?= 1
 
-.PHONY: init setup-python check-tools doctor doctor-fix setup-sudoers build-workload build-io-workload build-latency-workload collect latency-diff agent-run agent-run-pending agent-heartbeat agent-daemon api-run api-maintenance test integration-test compose-config compose-up compose-down compose-logs clean-runtime demo e2e-demo agent-demo python-demo
+.PHONY: init setup-python check-tools doctor doctor-fix setup-sudoers build-workload build-io-workload build-latency-workload collect latency-diff agent-run agent-run-pending agent-heartbeat agent-daemon api-run api-maintenance test integration-test compose-config compose-up compose-down compose-logs clean-runtime demo e2e-demo ebpf-demo agent-demo python-demo
 
 init:
 	mkdir -p $(MINIDROP_RUNTIME)/builds
@@ -161,6 +164,23 @@ e2e-demo: build-workload
 	POLL_INTERVAL=$(POLL_INTERVAL) \
 	LEASE_SECONDS=$(LEASE_SECONDS) \
 	bash scripts/e2e_demo.sh
+
+ebpf-demo: build-latency-workload
+	MINIDROP_RUNTIME=$(MINIDROP_RUNTIME) \
+	PYTHON=$(PYTHON) \
+	PYTHONPATH=$(PYTHONPATH) \
+	API_HOST=$(API_HOST) \
+	API_PORT=$(API_PORT) \
+	DURATION=$(DURATION) \
+	FREQUENCY=$(FREQUENCY) \
+	AGENT_ID=$(AGENT_ID) \
+	POLL_INTERVAL=$(POLL_INTERVAL) \
+	LEASE_SECONDS=$(LEASE_SECONDS) \
+	DIFF_OUTPUT=$(DIFF_OUTPUT) \
+	BASELINE_DELAY_US=$(BASELINE_DELAY_US) \
+	CURRENT_DELAY_US=$(CURRENT_DELAY_US) \
+	EBPF_DEMO_RUN_AGENT=$(EBPF_DEMO_RUN_AGENT) \
+	bash scripts/ebpf_demo.sh
 
 agent-demo: build-workload
 	@set -euo pipefail; \

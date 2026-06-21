@@ -71,6 +71,22 @@ find_host_perf_bin() {
   command -v perf || true
 }
 
+has_tracepoint() {
+  local event="$1"
+  local pattern="tracepoint:${event//\//:}"
+  [ -d "/sys/kernel/tracing/events/${event}" ] || [ -d "/sys/kernel/debug/tracing/events/${event}" ]
+  if [ "$?" -eq 0 ]; then
+    return 0
+  fi
+
+  if command -v bpftrace >/dev/null 2>&1; then
+    sudo -n bpftrace -l "$pattern" 2>/dev/null | grep -qx "$pattern" && return 0
+    bpftrace -l "$pattern" 2>/dev/null | grep -qx "$pattern" && return 0
+  fi
+
+  return 1
+}
+
 section "System"
 if [ "$(uname -s)" = "Linux" ]; then
   pass "running on Linux $(uname -r)"
@@ -109,6 +125,15 @@ if [ -r /proc/sys/kernel/perf_event_paranoid ]; then
   else
     warn "perf_event_paranoid=$paranoid. Mini-Drop uses sudo perf, so this is usually acceptable."
   fi
+fi
+
+section "eBPF Tracepoints"
+if has_tracepoint "syscalls/sys_enter_read" && has_tracepoint "syscalls/sys_exit_read"; then
+  pass "syscalls read/write tracepoints are available"
+elif has_tracepoint "raw_syscalls/sys_enter" && has_tracepoint "raw_syscalls/sys_exit"; then
+  pass "raw_syscalls fallback tracepoints are available"
+else
+  fail "syscall tracepoints not found. Ensure tracefs/debugfs are mounted, for example: sudo mount -t tracefs tracefs /sys/kernel/tracing"
 fi
 
 section "Host perf for Docker Agent"

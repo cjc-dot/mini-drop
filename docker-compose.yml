@@ -74,6 +74,8 @@ services:
     volumes:
       - mini-drop-runtime:/runtime
       - ${HOST_PERF_BIN:-/usr/bin/perf}:/opt/minidrop-tools/perf:ro
+      - /sys/kernel/debug:/sys/kernel/debug:rw
+      - /sys/kernel/tracing:/sys/kernel/tracing:rw
 
 volumes:
   mini-drop-runtime:

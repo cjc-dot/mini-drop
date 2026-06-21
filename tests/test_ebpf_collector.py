@@ -21,6 +21,21 @@ Attaching 3 probes...
         return "bpftrace v0.test"
 
 
+class FallbackEbpfSyscallCollector(EbpfSyscallCollector):
+    def __init__(self) -> None:
+        super().__init__()
+        self.scripts: list[str] = []
+
+    def _capture_bpftrace(self, pid: int, duration_seconds: int, script: str | None = None) -> str:
+        self.scripts.append(script or "")
+        if len(self.scripts) == 1:
+            raise RuntimeError("bpftrace failed with exit code 1:\nERROR: tracepoint not found: syscalls:sys_enter_read")
+        return "@read: 4\n@write: 6\n"
+
+    def _tool_version(self) -> str:
+        return "bpftrace v0.test"
+
+
 def test_parse_bpftrace_syscall_counts() -> None:
     output = "Attaching 3 probes...\n@read: 12\n@write: 5\n"
 
@@ -58,6 +73,7 @@ def test_ebpf_syscall_collector_writes_report_and_summary(tmp_path: Path) -> Non
     assert report["tool_version"] == "bpftrace v0.test"
     assert report["kernel_release"]
     assert report["script_hash"].startswith("sha256:")
+    assert report["tracepoint_mode"] == "syscalls"
     assert report["read_per_second"] == 7.0
     assert report["write_per_second"] == 3.0
     assert report["events"] == [
@@ -74,6 +90,26 @@ def test_ebpf_syscall_script_avoids_end_probe_for_bpftrace_compatibility() -> No
     assert "interval:s:5" in script
     assert "print(@read);" in script
     assert "exit();" in script
+
+
+def test_ebpf_syscall_raw_syscall_fallback_handles_missing_syscall_tracepoints(tmp_path: Path) -> None:
+    collector = FallbackEbpfSyscallCollector()
+
+    collector.collect(
+        pid=1234,
+        duration_seconds=1,
+        sample_frequency=99,
+        output_dir=str(tmp_path),
+    )
+
+    report = json.loads((tmp_path / "ebpf_syscalls.json").read_text(encoding="utf-8"))
+    assert len(collector.scripts) == 2
+    assert "tracepoint:syscalls:sys_enter_read" in collector.scripts[0]
+    assert "tracepoint:raw_syscalls:sys_enter" in collector.scripts[1]
+    assert "args->id == 0" in collector.scripts[1]
+    assert "args->id == 1" in collector.scripts[1]
+    assert report["tracepoint_mode"] == "raw_syscalls"
+    assert report["total_events"] == 10
 
 
 def test_generate_syscall_advice_reports_high_read_write_rates() -> None:

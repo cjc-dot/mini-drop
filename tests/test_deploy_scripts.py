@@ -43,6 +43,12 @@ def test_doctor_script_checks_clone_environment_without_mutating_system() -> Non
     assert "check_nopasswd perf" in script
     assert "check_nopasswd bpftrace" in script
     assert "check_nopasswd py-spy" in script
+    assert "has_tracepoint" in script
+    assert 'pattern="tracepoint:${event//\\//:}"' in script
+    assert 'sudo -n bpftrace -l "$pattern"' in script
+    assert "syscalls/sys_enter_read" in script
+    assert "raw_syscalls/sys_enter" in script
+    assert "sudo mount -t tracefs tracefs /sys/kernel/tracing" in script
     assert "find_host_perf_bin" in script
     assert 'require_docker="${MINIDROP_REQUIRE_DOCKER:-0}"' in script
     assert "docker_issue()" in script
@@ -65,6 +71,8 @@ def test_docker_compose_defines_api_and_privileged_agent_services() -> None:
     assert "pid: host" in compose
     assert "privileged: true" in compose
     assert "${HOST_PERF_BIN:-/usr/bin/perf}:/opt/minidrop-tools/perf:ro" in compose
+    assert "/sys/kernel/debug:/sys/kernel/debug:rw" in compose
+    assert "/sys/kernel/tracing:/sys/kernel/tracing:rw" in compose
     assert "MINIDROP_PERF_BIN: /opt/minidrop-tools/perf" in compose
     assert "minidrop_apiserver" in compose
     assert "minidrop_agent" in compose
@@ -79,6 +87,7 @@ def test_dockerfile_installs_runtime_tools_and_copies_project_modules() -> None:
     assert "bpftrace" in dockerfile
     assert "libpython3.10" in dockerfile
     assert "libtraceevent1" in dockerfile
+    assert "linux-libc-dev" in dockerfile
     assert "linux-tools-generic" in dockerfile
     assert "python3 -m pip install -r requirements.txt" in dockerfile
     assert "COPY analysis ./analysis" in dockerfile

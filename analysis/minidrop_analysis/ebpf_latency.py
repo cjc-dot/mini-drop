@@ -11,6 +11,8 @@ from pathlib import Path
 from .perf import ProfileSummary
 
 
+READ_SYSCALL_ID_X86_64 = 0
+WRITE_SYSCALL_ID_X86_64 = 1
 LATENCY_BUCKETS = [
     {"bucket": "0-10", "lower_us": 0, "upper_us": 10},
     {"bucket": "10-100", "lower_us": 10, "upper_us": 100},
@@ -55,7 +57,15 @@ class EbpfIoLatencyCollector:
         summary_path = output_path / "summary.json"
 
         script = self._script(pid=pid, duration_seconds=duration_seconds)
-        raw_text = self._capture_bpftrace(pid=pid, duration_seconds=duration_seconds, script=script)
+        tracepoint_mode = "syscalls"
+        try:
+            raw_text = self._capture_bpftrace(pid=pid, duration_seconds=duration_seconds, script=script)
+        except RuntimeError as exc:
+            if not _is_missing_syscall_tracepoint_error(str(exc)):
+                raise
+            script = self._raw_syscall_script(pid=pid, duration_seconds=duration_seconds)
+            tracepoint_mode = "raw_syscalls"
+            raw_text = self._capture_bpftrace(pid=pid, duration_seconds=duration_seconds, script=script)
         counts = parse_bpftrace_latency_counts(raw_text)
         raw_output.write_text(raw_text, encoding="utf-8")
 
@@ -69,6 +79,7 @@ class EbpfIoLatencyCollector:
             "tool_version": self._tool_version(),
             "kernel_release": platform.release(),
             "script_hash": self._script_hash(script),
+            "tracepoint_mode": tracepoint_mode,
             "unit": "us",
             "total_events": sum(event["total_count"] for event in events),
             "events": events,
@@ -170,9 +181,51 @@ interval:s:{duration_seconds} {{
 """
 
     @staticmethod
+    def _raw_syscall_script(pid: int, duration_seconds: int) -> str:
+        return f"""
+tracepoint:raw_syscalls:sys_enter /pid == {pid} && args->id == {READ_SYSCALL_ID_X86_64}/ {{ @read_start[tid] = nsecs; }}
+tracepoint:raw_syscalls:sys_exit /@read_start[tid]/ {{
+  $delta_us = (nsecs - @read_start[tid]) / 1000;
+  if ($delta_us < 10) {{ @read_0_10 = count(); }}
+  if ($delta_us >= 10 && $delta_us < 100) {{ @read_10_100 = count(); }}
+  if ($delta_us >= 100 && $delta_us < 1000) {{ @read_100_1000 = count(); }}
+  if ($delta_us >= 1000 && $delta_us < 10000) {{ @read_1000_10000 = count(); }}
+  if ($delta_us >= 10000) {{ @read_10000_plus = count(); }}
+  delete(@read_start[tid]);
+}}
+tracepoint:raw_syscalls:sys_enter /pid == {pid} && args->id == {WRITE_SYSCALL_ID_X86_64}/ {{ @write_start[tid] = nsecs; }}
+tracepoint:raw_syscalls:sys_exit /@write_start[tid]/ {{
+  $delta_us = (nsecs - @write_start[tid]) / 1000;
+  if ($delta_us < 10) {{ @write_0_10 = count(); }}
+  if ($delta_us >= 10 && $delta_us < 100) {{ @write_10_100 = count(); }}
+  if ($delta_us >= 100 && $delta_us < 1000) {{ @write_100_1000 = count(); }}
+  if ($delta_us >= 1000 && $delta_us < 10000) {{ @write_1000_10000 = count(); }}
+  if ($delta_us >= 10000) {{ @write_10000_plus = count(); }}
+  delete(@write_start[tid]);
+}}
+interval:s:{duration_seconds} {{
+  print(@read_0_10);
+  print(@read_10_100);
+  print(@read_100_1000);
+  print(@read_1000_10000);
+  print(@read_10000_plus);
+  print(@write_0_10);
+  print(@write_10_100);
+  print(@write_100_1000);
+  print(@write_1000_10000);
+  print(@write_10000_plus);
+  exit();
+}}
+"""
+
+    @staticmethod
     def _script_hash(script: str) -> str:
         digest = hashlib.sha256(script.encode("utf-8")).hexdigest()
         return f"sha256:{digest}"
+
+
+def _is_missing_syscall_tracepoint_error(message: str) -> bool:
+    return "tracepoint not found" in message and "syscalls:sys_" in message
 
 
 def generate_latency_advice(report: dict) -> dict:

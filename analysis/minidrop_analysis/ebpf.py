@@ -12,6 +12,8 @@ from .perf import ProfileSummary
 
 
 SYSCALL_COUNTER_PATTERN = re.compile(r"@(?P<name>read|write):\s*(?P<count>\d+)")
+READ_SYSCALL_ID_X86_64 = 0
+WRITE_SYSCALL_ID_X86_64 = 1
 
 
 def parse_bpftrace_syscall_counts(output: str) -> dict[str, int]:
@@ -105,7 +107,15 @@ class EbpfSyscallCollector:
         summary_path = output_path / "summary.json"
 
         script = self._script(pid=pid, duration_seconds=duration_seconds)
-        raw_text = self._capture_bpftrace(pid=pid, duration_seconds=duration_seconds, script=script)
+        tracepoint_mode = "syscalls"
+        try:
+            raw_text = self._capture_bpftrace(pid=pid, duration_seconds=duration_seconds, script=script)
+        except RuntimeError as exc:
+            if not _is_missing_syscall_tracepoint_error(str(exc)):
+                raise
+            script = self._raw_syscall_script(pid=pid, duration_seconds=duration_seconds)
+            tracepoint_mode = "raw_syscalls"
+            raw_text = self._capture_bpftrace(pid=pid, duration_seconds=duration_seconds, script=script)
         counts = parse_bpftrace_syscall_counts(raw_text)
         raw_output.write_text(raw_text, encoding="utf-8")
 
@@ -118,6 +128,7 @@ class EbpfSyscallCollector:
             "tool_version": self._tool_version(),
             "kernel_release": platform.release(),
             "script_hash": self._script_hash(script),
+            "tracepoint_mode": tracepoint_mode,
             "total_events": sum(counts.values()),
             "read_per_second": event_rate(counts["read"], duration_seconds),
             "write_per_second": event_rate(counts["write"], duration_seconds),
@@ -205,9 +216,25 @@ interval:s:{duration_seconds} {{
 """
 
     @staticmethod
+    def _raw_syscall_script(pid: int, duration_seconds: int) -> str:
+        return f"""
+tracepoint:raw_syscalls:sys_enter /pid == {pid} && args->id == {READ_SYSCALL_ID_X86_64}/ {{ @read = count(); }}
+tracepoint:raw_syscalls:sys_enter /pid == {pid} && args->id == {WRITE_SYSCALL_ID_X86_64}/ {{ @write = count(); }}
+interval:s:{duration_seconds} {{
+  print(@read);
+  print(@write);
+  exit();
+}}
+"""
+
+    @staticmethod
     def _script_hash(script: str) -> str:
         digest = hashlib.sha256(script.encode("utf-8")).hexdigest()
         return f"sha256:{digest}"
+
+
+def _is_missing_syscall_tracepoint_error(message: str) -> bool:
+    return "tracepoint not found" in message and "syscalls:sys_" in message
 
 
 def _build_high_rate_finding(report: dict, event_name: str, event: dict, rate: float) -> dict:

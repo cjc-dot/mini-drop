@@ -21,6 +21,21 @@ Attaching 5 probes...
         return "bpftrace v0.test"
 
 
+class FallbackEbpfIoLatencyCollector(EbpfIoLatencyCollector):
+    def __init__(self) -> None:
+        super().__init__()
+        self.scripts: list[str] = []
+
+    def _capture_bpftrace(self, pid: int, duration_seconds: int, script: str | None = None) -> str:
+        self.scripts.append(script or "")
+        if len(self.scripts) == 1:
+            raise RuntimeError("bpftrace failed with exit code 1:\nERROR: tracepoint not found: syscalls:sys_enter_read")
+        return "@read_1000_10000: 5\n@write_10_100: 7\n"
+
+    def _tool_version(self) -> str:
+        return "bpftrace v0.test"
+
+
 def test_parse_bpftrace_latency_counts_defaults_missing_buckets_to_zero() -> None:
     counts = parse_bpftrace_latency_counts("@read_0_10: 12\n@write_1000_10000: 2\n")
 
@@ -49,6 +64,7 @@ def test_ebpf_io_latency_collector_writes_report_summary_and_suggestions(tmp_pat
     assert report["tool_version"] == "bpftrace v0.test"
     assert report["kernel_release"]
     assert report["script_hash"].startswith("sha256:")
+    assert report["tracepoint_mode"] == "syscalls"
     assert report["unit"] == "us"
     assert report["total_events"] == 200
     read = report["events"][0]
@@ -72,6 +88,27 @@ def test_ebpf_io_latency_script_tracks_enter_exit_without_end_probe() -> None:
     assert "interval:s:5" in script
     assert "print(@read_1000_10000);" in script
     assert "exit();" in script
+
+
+def test_ebpf_io_latency_raw_syscall_fallback_handles_missing_syscall_tracepoints(tmp_path: Path) -> None:
+    collector = FallbackEbpfIoLatencyCollector()
+
+    collector.collect(
+        pid=1234,
+        duration_seconds=5,
+        sample_frequency=99,
+        output_dir=str(tmp_path),
+    )
+
+    report = json.loads((tmp_path / "ebpf_io_latency.json").read_text(encoding="utf-8"))
+    assert len(collector.scripts) == 2
+    assert "tracepoint:syscalls:sys_enter_read" in collector.scripts[0]
+    assert "tracepoint:raw_syscalls:sys_enter" in collector.scripts[1]
+    assert "tracepoint:raw_syscalls:sys_exit" in collector.scripts[1]
+    assert "args->id == 0" in collector.scripts[1]
+    assert "args->id == 1" in collector.scripts[1]
+    assert report["tracepoint_mode"] == "raw_syscalls"
+    assert report["total_events"] == 12
 
 
 def test_generate_latency_advice_reports_tail_and_bimodal_distribution() -> None:

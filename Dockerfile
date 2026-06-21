@@ -14,6 +14,7 @@ RUN apt-get update \
         gcc \
         libpython3.10 \
         libtraceevent1 \
+        linux-libc-dev \
         linux-tools-common \
         linux-tools-generic \
         make \
