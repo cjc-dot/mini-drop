@@ -34,7 +34,7 @@ CURRENT_DELAY_US ?= 2000
 EBPF_DEMO_RUN_AGENT ?= 1
 DEMO_RUN_AGENT ?= 0
 
-.PHONY: init setup-python check-tools doctor doctor-fix setup-sudoers build-workload build-io-workload build-latency-workload collect latency-diff agent-run agent-run-pending agent-heartbeat agent-daemon api-run api-maintenance test integration-test compose-config compose-up compose-down compose-logs clean-runtime demo local-demo e2e-demo ebpf-demo agent-demo python-demo
+.PHONY: init setup-python check-tools doctor doctor-fix setup-sudoers build-workload build-io-workload build-latency-workload build-fusion-workload collect latency-diff agent-run agent-run-pending agent-heartbeat agent-daemon api-run api-maintenance test integration-test compose-config compose-up compose-down compose-logs clean-runtime demo local-demo e2e-demo ebpf-demo agent-demo python-demo
 
 init:
 	mkdir -p $(MINIDROP_RUNTIME)/builds
@@ -78,6 +78,11 @@ build-latency-workload: init
 	gcc -O2 -g -fno-omit-frame-pointer -pthread \
 		-o $(MINIDROP_RUNTIME)/builds/io_latency_hotspot \
 		workloads/io_latency_hotspot.c
+
+build-fusion-workload: init
+	gcc -O2 -g -fno-omit-frame-pointer -pthread \
+		-o $(MINIDROP_RUNTIME)/builds/cpu_io_hotspot \
+		workloads/cpu_io_hotspot.c
 
 collect:
 	@if [ -z "$(PID)" ]; then echo "Usage: make collect PID=<target-pid> [DURATION=10] [FREQUENCY=99] [PROFILE_ID=name]"; exit 2; fi

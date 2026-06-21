@@ -120,3 +120,6 @@ def test_makefile_exposes_compose_targets() -> None:
     assert "compose-down:" in makefile
     assert "HOST_KERNEL=$(HOST_KERNEL) HOST_PERF_BIN=$(HOST_PERF_BIN) docker compose down" in makefile
     assert "compose-logs:" in makefile
+    assert "build-fusion-workload:" in makefile
+    assert "workloads/cpu_io_hotspot.c" in makefile
+    assert (root / "workloads" / "cpu_io_hotspot.c").exists()

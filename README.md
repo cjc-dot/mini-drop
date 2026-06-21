@@ -9,6 +9,7 @@ Mini-Drop is a Linux profiling practice project. The current milestone provides 
 5. run the same collector through a local Agent job state machine.
 6. create and query profiling jobs through a minimal API server.
 7. view jobs, Agent heartbeat status, and result artifacts through a minimal Web UI.
+8. run an Agent daemon that sends heartbeat messages and automatically consumes pending jobs.
 
 ## Quick Start
 
@@ -43,7 +44,13 @@ Open the minimal Web UI after the API server starts:
 http://127.0.0.1:8000/ui
 ```
 
-After creating a job through the API, the local Agent can consume one pending job:
+After creating a job through the API, the local Agent daemon can automatically consume pending jobs:
+
+```bash
+make agent-daemon
+```
+
+For debugging, the local Agent can still consume one pending job manually:
 
 ```bash
 make agent-run-pending
