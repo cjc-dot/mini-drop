@@ -32,8 +32,9 @@ DIFF_OUTPUT ?= $(MINIDROP_RUNTIME)/profiles/ebpf-latency-diff.json
 BASELINE_DELAY_US ?= 50
 CURRENT_DELAY_US ?= 2000
 EBPF_DEMO_RUN_AGENT ?= 1
+DEMO_RUN_AGENT ?= 0
 
-.PHONY: init setup-python check-tools doctor doctor-fix setup-sudoers build-workload build-io-workload build-latency-workload collect latency-diff agent-run agent-run-pending agent-heartbeat agent-daemon api-run api-maintenance test integration-test compose-config compose-up compose-down compose-logs clean-runtime demo e2e-demo ebpf-demo agent-demo python-demo
+.PHONY: init setup-python check-tools doctor doctor-fix setup-sudoers build-workload build-io-workload build-latency-workload collect latency-diff agent-run agent-run-pending agent-heartbeat agent-daemon api-run api-maintenance test integration-test compose-config compose-up compose-down compose-logs clean-runtime demo local-demo e2e-demo ebpf-demo agent-demo python-demo
 
 init:
 	mkdir -p $(MINIDROP_RUNTIME)/builds
@@ -142,7 +143,25 @@ api-maintenance:
 		-H "Content-Type: application/json" \
 		-d '{"max_claim_attempts": $(MAX_CLAIM_ATTEMPTS)}'
 
-demo: build-workload
+demo: build-workload build-latency-workload
+	$(MAKE) doctor REQUIRE_DOCKER=1
+	MINIDROP_RUNTIME=$(MINIDROP_RUNTIME) \
+	PYTHON=$(PYTHON) \
+	PYTHONPATH=$(PYTHONPATH) \
+	API_HOST=$(API_HOST) \
+	API_PORT=$(API_PORT) \
+	DURATION=$(DURATION) \
+	FREQUENCY=$(FREQUENCY) \
+	AGENT_ID=$(AGENT_ID) \
+	POLL_INTERVAL=$(POLL_INTERVAL) \
+	LEASE_SECONDS=$(LEASE_SECONDS) \
+	DIFF_OUTPUT=$(DIFF_OUTPUT) \
+	BASELINE_DELAY_US=$(BASELINE_DELAY_US) \
+	CURRENT_DELAY_US=$(CURRENT_DELAY_US) \
+	DEMO_RUN_AGENT=$(DEMO_RUN_AGENT) \
+	bash scripts/full_demo.sh
+
+local-demo: build-workload
 	@set -euo pipefail; \
 	$(MINIDROP_RUNTIME)/builds/cpu_hotspot > $(MINIDROP_RUNTIME)/logs/cpu_hotspot.log 2>&1 & \
 	pid=$$!; \
