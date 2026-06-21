@@ -16,7 +16,19 @@ fi
 
 find_tool() {
   local name="$1"
+  local env_name="$2"
+  local configured_path="${!env_name:-}"
   local path
+
+  if [ -n "$configured_path" ]; then
+    if [ ! -x "$configured_path" ]; then
+      echo "ERROR: configured tool path is not executable: $configured_path" >&2
+      exit 1
+    fi
+    readlink -f "$configured_path"
+    return
+  fi
+
   path="$(command -v "$name" || true)"
   if [ -z "$path" ]; then
     echo "ERROR: required tool not found: $name" >&2
@@ -25,9 +37,9 @@ find_tool() {
   readlink -f "$path"
 }
 
-perf_bin="$(find_tool perf)"
-bpftrace_bin="$(find_tool bpftrace)"
-py_spy_bin="$(find_tool py-spy)"
+perf_bin="$(find_tool perf MINIDROP_PERF_BIN)"
+bpftrace_bin="$(find_tool bpftrace MINIDROP_BPFTRACE_BIN)"
+py_spy_bin="$(find_tool py-spy MINIDROP_PY_SPY_BIN)"
 sudoers_file="/etc/sudoers.d/mini-drop-tools"
 tmp_file="$(mktemp)"
 

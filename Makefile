@@ -23,11 +23,14 @@ JOB_SOURCE ?= server
 LEASE_SECONDS ?= 60
 HOST_KERNEL ?= $(shell uname -r)
 HOST_PERF_BIN ?= $(shell if [ -x /usr/lib/linux-tools-$(HOST_KERNEL)/perf ]; then echo /usr/lib/linux-tools-$(HOST_KERNEL)/perf; elif [ -x /usr/lib/linux-tools/$(HOST_KERNEL)/perf ]; then echo /usr/lib/linux-tools/$(HOST_KERNEL)/perf; else command -v perf; fi)
+HOST_BPFTRACE_BIN ?= $(shell command -v bpftrace 2>/dev/null || true)
+HOST_PY_SPY_BIN ?= $(shell command -v py-spy 2>/dev/null || true)
+REQUIRE_DOCKER ?= 0
 BASELINE ?=
 CURRENT ?=
 DIFF_OUTPUT ?= $(MINIDROP_RUNTIME)/profiles/ebpf-latency-diff.json
 
-.PHONY: init check-tools setup-sudoers build-workload build-io-workload build-latency-workload collect latency-diff agent-run agent-run-pending agent-heartbeat agent-daemon api-run api-maintenance test integration-test compose-config compose-up compose-down compose-logs clean-runtime demo e2e-demo agent-demo python-demo
+.PHONY: init setup-python check-tools doctor doctor-fix setup-sudoers build-workload build-io-workload build-latency-workload collect latency-diff agent-run agent-run-pending agent-heartbeat agent-daemon api-run api-maintenance test integration-test compose-config compose-up compose-down compose-logs clean-runtime demo e2e-demo agent-demo python-demo
 
 init:
 	mkdir -p $(MINIDROP_RUNTIME)/builds
@@ -39,10 +42,23 @@ init:
 check-tools:
 	bash deploy/check_tools.sh
 
+setup-python:
+	$(PYTHON) -m pip install -r requirements.txt
+
+doctor:
+	MINIDROP_REQUIRE_DOCKER=$(REQUIRE_DOCKER) bash deploy/doctor.sh
+
 setup-sudoers:
 	@echo "This command configures passwordless sudo for perf, bpftrace, and py-spy."
 	@echo "It writes /etc/sudoers.d/mini-drop-tools and requires your sudo password once."
-	sudo bash deploy/setup_sudoers.sh
+	sudo env \
+		MINIDROP_PERF_BIN="$(HOST_PERF_BIN)" \
+		MINIDROP_BPFTRACE_BIN="$(HOST_BPFTRACE_BIN)" \
+		MINIDROP_PY_SPY_BIN="$(HOST_PY_SPY_BIN)" \
+		bash deploy/setup_sudoers.sh
+
+doctor-fix: setup-sudoers
+	$(MAKE) doctor
 
 build-workload: init
 	gcc -O2 -g -fno-omit-frame-pointer \
