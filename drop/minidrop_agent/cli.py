@@ -3,9 +3,12 @@ from __future__ import annotations
 import argparse
 import json
 
+from minidrop_analysis.structured_log import log_event
+
 from .daemon import AgentDaemon
 from .heartbeat import HeartbeatClient, result_to_dict
 from .http_jobs import HttpJobRunner
+from .job import JobResult
 from .job import JobSpec
 from .runner import LocalAgent
 
@@ -25,7 +28,27 @@ def _non_negative_int(value: str) -> int:
 
 
 def _print_skip(job_id: str, reason: str, error: str | None) -> None:
+    log_event(
+        "agent",
+        "job_skipped",
+        job_id=job_id,
+        reason=reason,
+        error_message=error,
+    )
     print(f"Skipped {job_id}: {reason}" + (f" ({error})" if error else ""), flush=True)
+
+
+def _print_job_result(result: JobResult) -> None:
+    log_event(
+        "agent",
+        "job_finished",
+        job_id=result.job_id,
+        status=result.status,
+        output_dir=result.output_dir,
+        artifact_count=len(result.artifacts),
+        error_message=result.error_message,
+    )
+    print(f"Job {result.job_id} finished with status {result.status}", flush=True)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -82,7 +105,7 @@ def main(argv: list[str] | None = None) -> int:
             collector=args.collector,
         )
         result = LocalAgent(runtime_dir=args.runtime_dir).run(spec)
-        print(f"Job {result.job_id} finished with status {result.status}")
+        _print_job_result(result)
         print(f"Job metadata: {result.job_file}")
         return 0 if result.status == "DONE" else 1
 
@@ -96,7 +119,7 @@ def main(argv: list[str] | None = None) -> int:
         if result is None:
             print("No pending job found")
             return 0
-        print(f"Job {result.job_id} finished with status {result.status}")
+        _print_job_result(result)
         print(f"Job metadata: {result.job_file}")
         return 0 if result.status == "DONE" else 1
 
@@ -135,7 +158,7 @@ def main(argv: list[str] | None = None) -> int:
             validate_pid=not args.disable_pid_check,
             version=args.version,
             agent=pending_agent,
-            on_job_result=lambda result: print(f"Job {result.job_id} finished with status {result.status}", flush=True),
+            on_job_result=_print_job_result,
             on_job_skip=_print_skip,
         )
         try:

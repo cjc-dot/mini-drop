@@ -31,6 +31,114 @@ def test_create_job_rejects_missing_target_pid(tmp_path) -> None:
     assert response.json()["detail"]["message"] == "target pid 999999 does not exist"
 
 
+def test_api_request_emits_structured_log(tmp_path, capsys) -> None:
+    client = TestClient(create_app(str(tmp_path), process_inspector=FakeProcessInspector({})))
+
+    response = client.get("/api/jobs")
+
+    assert response.status_code == 200
+    lines = [json.loads(line) for line in capsys.readouterr().out.splitlines() if line.startswith("{")]
+    assert any(
+        line["component"] == "apiserver"
+        and line["event"] == "http_request"
+        and line["method"] == "GET"
+        and line["path"] == "/api/jobs"
+        and line["status_code"] == 200
+        for line in lines
+    )
+
+
+def test_health_check_does_not_emit_noisy_structured_log(tmp_path, capsys) -> None:
+    client = TestClient(create_app(str(tmp_path), process_inspector=FakeProcessInspector({})))
+
+    response = client.get("/api/health")
+
+    assert response.status_code == 200
+    output = capsys.readouterr().out
+    assert "http_request" not in output
+
+
+def test_first_heartbeat_emits_agent_status_change_without_request_log(tmp_path, capsys) -> None:
+    client = TestClient(create_app(str(tmp_path), process_inspector=FakeProcessInspector({})))
+
+    response = client.post(
+        "/api/agents/local-agent/heartbeat",
+        json={"hostname": "host-a", "pid": 100, "version": "0.1.0"},
+    )
+
+    assert response.status_code == 200
+    lines = [json.loads(line) for line in capsys.readouterr().out.splitlines() if line.startswith("{")]
+    assert not any(line["event"] == "http_request" for line in lines)
+    assert any(
+        line["component"] == "apiserver"
+        and line["event"] == "agent_status_changed"
+        and line["agent_id"] == "local-agent"
+        and line["reason"] == "agent registered by heartbeat"
+        for line in lines
+    )
+
+
+def test_normal_heartbeat_does_not_emit_noisy_structured_log(tmp_path, capsys) -> None:
+    client = TestClient(create_app(str(tmp_path), process_inspector=FakeProcessInspector({})))
+    payload = {"hostname": "host-a", "pid": 100, "version": "0.1.0"}
+    client.post("/api/agents/local-agent/heartbeat", json=payload)
+    capsys.readouterr()
+
+    response = client.post("/api/agents/local-agent/heartbeat", json=payload)
+
+    assert response.status_code == 200
+    output = capsys.readouterr().out
+    assert "http_request" not in output
+    assert "agent_status_changed" not in output
+
+
+def test_empty_claim_poll_does_not_emit_noisy_structured_log(tmp_path, capsys) -> None:
+    client = TestClient(create_app(str(tmp_path), process_inspector=FakeProcessInspector({})))
+
+    response = client.post(
+        "/api/agents/local-agent/jobs/claim",
+        json={"max_pending_age_seconds": 300},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"job": None, "skipped": []}
+    output = capsys.readouterr().out
+    assert "http_request" not in output
+    assert "job_claim_response" not in output
+
+
+def test_claimed_job_still_emits_claim_structured_log(tmp_path, capsys) -> None:
+    client = TestClient(create_app(str(tmp_path), process_inspector=FakeProcessInspector({1234: {"pid": 1234}})))
+    created = client.post(
+        "/api/jobs",
+        json={"pid": 1234, "duration_seconds": 10, "sample_frequency": 99},
+    ).json()
+    capsys.readouterr()
+
+    response = client.post(
+        "/api/agents/local-agent/jobs/claim",
+        json={"max_pending_age_seconds": 300},
+    )
+
+    assert response.status_code == 200
+    lines = [json.loads(line) for line in capsys.readouterr().out.splitlines() if line.startswith("{")]
+    assert any(
+        line["component"] == "apiserver"
+        and line["event"] == "job_claim_response"
+        and line["job_id"] == created["job_id"]
+        and line["agent_id"] == "local-agent"
+        for line in lines
+    )
+
+
+def test_apiserver_cli_disables_uvicorn_access_log_by_default() -> None:
+    root = Path(__file__).resolve().parents[1]
+    entrypoint = (root / "apiserver" / "minidrop_apiserver" / "__main__.py").read_text(encoding="utf-8")
+
+    assert 'parser.add_argument("--access-log"' in entrypoint
+    assert "access_log=args.access_log" in entrypoint
+
+
 def test_create_job_persists_target_process_metadata(tmp_path) -> None:
     target = {
         "pid": 1234,

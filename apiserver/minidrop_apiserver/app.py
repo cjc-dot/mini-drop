@@ -3,15 +3,17 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import time
 from typing import Literal
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from minidrop_analysis.latency_diff import compare_latency_reports, no_latency_baseline_report
 from minidrop_analysis.report import build_diagnostic_report
+from minidrop_analysis.structured_log import log_event
 
 from .agent_store import AgentRegistry
 from .process import ProcessInspector
@@ -81,6 +83,36 @@ def create_app(runtime_dir: str | None = None, process_inspector: ProcessInspect
     if frontend_dir.exists():
         app.mount("/ui/static", StaticFiles(directory=str(frontend_dir)), name="ui-static")
 
+    @app.middleware("http")
+    async def log_http_request(request: Request, call_next):
+        started_at = time.monotonic()
+        try:
+            response = await call_next(request)
+        except Exception as exc:
+            log_event(
+                "apiserver",
+                "http_request_failed",
+                level="ERROR",
+                method=request.method,
+                path=request.url.path,
+                duration_ms=round((time.monotonic() - started_at) * 1000, 2),
+                error_type=type(exc).__name__,
+                error_message=str(exc),
+            )
+            raise
+
+        duration_ms = round((time.monotonic() - started_at) * 1000, 2)
+        if not _is_noisy_successful_request(request.url.path, response.status_code):
+            log_event(
+                "apiserver",
+                "http_request",
+                method=request.method,
+                path=request.url.path,
+                status_code=response.status_code,
+                duration_ms=duration_ms,
+            )
+        return response
+
     @app.get("/api/health")
     def health() -> dict:
         return {"service": "Mini-Drop API Server", "status": "running"}
@@ -104,13 +136,23 @@ def create_app(runtime_dir: str | None = None, process_inspector: ProcessInspect
                     "message": f"target pid {request.pid} does not exist",
                 },
             )
-        return store.create_job(
+        job = store.create_job(
             pid=request.pid,
             duration_seconds=request.duration_seconds,
             sample_frequency=request.sample_frequency,
             collector=request.collector,
             target=target,
         )
+        log_event(
+            "apiserver",
+            "job_created",
+            job_id=job["job_id"],
+            pid=request.pid,
+            collector=request.collector,
+            duration_seconds=request.duration_seconds,
+            sample_frequency=request.sample_frequency,
+        )
+        return job
 
     @app.post("/api/continuous-profiles", status_code=201)
     def create_continuous_profile(request: CreateContinuousProfileRequest) -> dict:
@@ -123,7 +165,7 @@ def create_app(runtime_dir: str | None = None, process_inspector: ProcessInspect
                     "message": f"target pid {request.pid} does not exist",
                 },
             )
-        return store.create_continuous_profile(
+        session = store.create_continuous_profile(
             pid=request.pid,
             slice_duration_seconds=request.slice_duration_seconds,
             sample_frequency=request.sample_frequency,
@@ -132,6 +174,16 @@ def create_app(runtime_dir: str | None = None, process_inspector: ProcessInspect
             interval_seconds=request.interval_seconds,
             target=target,
         )
+        log_event(
+            "apiserver",
+            "continuous_profile_created",
+            session_id=session["session_id"],
+            pid=request.pid,
+            collector=request.collector,
+            slice_count=request.slice_count,
+            slice_duration_seconds=request.slice_duration_seconds,
+        )
+        return session
 
     @app.get("/api/continuous-profiles")
     def list_continuous_profiles() -> list[dict]:
@@ -258,21 +310,43 @@ def create_app(runtime_dir: str | None = None, process_inspector: ProcessInspect
 
     @app.post("/api/agents/{agent_id}/heartbeat")
     def agent_heartbeat(agent_id: str, request: AgentHeartbeatRequest) -> dict:
-        return agents.record_heartbeat(
+        agent = agents.record_heartbeat(
             agent_id=agent_id,
             hostname=request.hostname,
             pid=request.pid,
             version=request.version,
         )
+        if _is_meaningful_agent_heartbeat(agent):
+            log_event(
+                "apiserver",
+                "agent_status_changed",
+                agent_id=agent_id,
+                status=agent.get("status"),
+                reason=agent.get("reason"),
+                heartbeat_count=agent.get("heartbeat_count"),
+            )
+        return agent
 
     @app.post("/api/agents/{agent_id}/jobs/claim")
     def claim_job(agent_id: str, request: ClaimJobRequest) -> dict:
-        return store.claim_pending_job(
+        result = store.claim_pending_job(
             agent_id=agent_id,
             max_pending_age_seconds=request.max_pending_age_seconds,
             lease_seconds=request.lease_seconds,
             max_claim_attempts=request.max_claim_attempts,
         )
+        job = result.get("job")
+        skipped_count = len(result.get("skipped", []))
+        if job is not None or skipped_count > 0:
+            log_event(
+                "apiserver",
+                "job_claim_response",
+                agent_id=agent_id,
+                job_id=job.get("job_id") if job else None,
+                status=job.get("status") if job else None,
+                skipped_count=skipped_count,
+            )
+        return result
 
     @app.post("/api/agents/{agent_id}/jobs/{job_id}/lease")
     def renew_job_lease(agent_id: str, job_id: str, request: RenewLeaseRequest) -> dict:
@@ -291,7 +365,7 @@ def create_app(runtime_dir: str | None = None, process_inspector: ProcessInspect
     @app.post("/api/agents/{agent_id}/jobs/{job_id}/finish")
     def finish_job(agent_id: str, job_id: str, request: FinishJobRequest) -> dict:
         try:
-            return store.finish_claimed_job(
+            job = store.finish_claimed_job(
                 agent_id=agent_id,
                 job_id=job_id,
                 status=request.status,
@@ -300,6 +374,17 @@ def create_app(runtime_dir: str | None = None, process_inspector: ProcessInspect
                 reason=request.reason,
                 lease_token=request.lease_token,
             )
+            log_event(
+                "apiserver",
+                "job_finished",
+                agent_id=agent_id,
+                job_id=job_id,
+                status=job.get("status"),
+                reason=job.get("reason"),
+                artifact_count=len(job.get("artifacts", {})),
+                error_message=job.get("error_message"),
+            )
+            return job
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail="job not found") from exc
         except ValueError as exc:
@@ -310,12 +395,21 @@ def create_app(runtime_dir: str | None = None, process_inspector: ProcessInspect
     @app.post("/api/agents/{agent_id}/jobs/{job_id}/artifacts")
     def upload_job_artifacts(agent_id: str, job_id: str, request: UploadArtifactsRequest) -> dict:
         try:
-            return store.upload_artifacts(
+            job = store.upload_artifacts(
                 agent_id=agent_id,
                 job_id=job_id,
                 artifact_payloads=request.artifacts,
                 lease_token=request.lease_token,
             )
+            log_event(
+                "apiserver",
+                "job_artifacts_uploaded",
+                agent_id=agent_id,
+                job_id=job_id,
+                uploaded_count=len(request.artifacts),
+                stored_count=len(job.get("artifacts", {})),
+            )
+            return job
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail="job not found") from exc
         except ArtifactUploadError as exc:
@@ -408,3 +502,17 @@ def _find_previous_ebpf_latency_job(jobs: list[dict], current_job: dict) -> dict
             continue
         return job
     return None
+
+
+def _is_noisy_successful_request(path: str, status_code: int) -> bool:
+    if status_code != 200:
+        return False
+    if path == "/api/health":
+        return True
+    if path.startswith("/api/agents/") and path.endswith("/heartbeat"):
+        return True
+    return path.startswith("/api/agents/") and path.endswith("/jobs/claim")
+
+
+def _is_meaningful_agent_heartbeat(agent: dict) -> bool:
+    return agent.get("reason") in {"agent registered by heartbeat", "heartbeat recovered"}
