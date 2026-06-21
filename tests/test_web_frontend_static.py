@@ -32,6 +32,7 @@ def test_web_frontend_uses_existing_api_routes() -> None:
     assert "/compare/ebpf-io-latency" in app_js
     assert "/report" in app_js
     assert "/attribution" in app_js
+    assert "/llm-report" in app_js
     assert "collectorInput" in app_js
     assert "continuousInput" in app_js
     assert "renderContinuousProfiles" in app_js
@@ -53,6 +54,8 @@ def test_web_frontend_contains_job_report_panel() -> None:
     assert 'id="pyspyBody"' in index
     assert 'id="diagnosisBody"' in index
     assert 'id="attributionBody"' in index
+    assert 'id="llmBody"' in index
+    assert "LLM Report" in index
     assert 'id="collectorInput"' in index
     assert 'id="continuousInput"' in index
     assert 'id="sliceCountInput"' in index
@@ -76,8 +79,11 @@ def test_web_frontend_contains_job_report_panel() -> None:
     assert "renderLatencyDiff" in app_js
     assert "renderDiagnosticReport" in app_js
     assert "renderAttribution" in app_js
+    assert "renderLlmReport" in app_js
     assert "confidence_score" in app_js
     assert "triage_priority" in app_js
+    assert "claim_type" in app_js
+    assert "evidenceLimit" in app_js
     assert "missing_evidence" in app_js
     assert "renderPyspyProfile" in app_js
     assert "formatSigned" in app_js
@@ -100,6 +106,9 @@ def test_web_frontend_contains_latency_chart_styles() -> None:
     assert ".attribution-card" in styles
     assert ".badge.priority" in styles
     assert ".attribution-missing" in styles
+    assert ".llm-body" in styles
+    assert ".llm-card" in styles
+    assert ".llm-markdown" in styles
 
 
 def test_web_ui_route_serves_index(tmp_path: Path) -> None:

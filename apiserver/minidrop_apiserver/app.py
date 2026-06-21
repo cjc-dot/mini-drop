@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 
 from minidrop_analysis.attribution import build_attribution_report
 from minidrop_analysis.latency_diff import compare_latency_reports, no_latency_baseline_report
+from minidrop_analysis.llm_report import build_llm_report
 from minidrop_analysis.report import build_diagnostic_report
 from minidrop_analysis.structured_log import log_event
 
@@ -311,7 +312,34 @@ def create_app(runtime_dir: str | None = None, process_inspector: ProcessInspect
 
     @app.get("/api/jobs/{job_id}/attribution")
     def get_attribution_report(job_id: str) -> dict:
-        return build_attribution_report(get_diagnostic_report(job_id))
+        job = store.get_job(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="job not found")
+        report = get_diagnostic_report(job_id)
+        related_reports = _related_diagnostic_reports(
+            jobs=store.list_jobs(),
+            current_job=job,
+            runtime_root=runtime_root,
+        )
+        if related_reports:
+            report = _merge_related_reports_for_attribution(report, related_reports)
+        return build_attribution_report(report)
+
+    @app.get("/api/jobs/{job_id}/llm-report")
+    def get_llm_report(job_id: str, mode: Literal["auto", "template", "llm"] = "auto") -> dict:
+        job = store.get_job(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="job not found")
+        diagnostic_report = get_diagnostic_report(job_id)
+        attribution_report = get_attribution_report(job_id)
+        try:
+            return build_llm_report(
+                diagnostic_report=diagnostic_report,
+                attribution_report=attribution_report,
+                mode=mode,
+            )
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     @app.post("/api/agents/{agent_id}/heartbeat")
     def agent_heartbeat(agent_id: str, request: AgentHeartbeatRequest) -> dict:
@@ -486,6 +514,110 @@ def _load_optional_json_artifacts(
         except json.JSONDecodeError as exc:
             warnings.append(f"{artifact_name} ignored: invalid json at line {exc.lineno}")
     return artifacts, warnings
+
+
+def _related_diagnostic_reports(
+    jobs: list[dict],
+    current_job: dict,
+    runtime_root: Path,
+    limit: int = 4,
+) -> list[dict]:
+    current_job_id = current_job.get("job_id")
+    current_collector = current_job.get("spec", {}).get("collector")
+    current_target = current_job.get("spec", {}).get("target", {})
+    if not current_target:
+        return []
+
+    reports: list[dict] = []
+    seen_collectors = {current_collector}
+    candidates = sorted(jobs, key=lambda item: item.get("created_at", ""), reverse=True)
+    for job in candidates:
+        if len(reports) >= limit:
+            break
+        if job.get("job_id") == current_job_id:
+            continue
+        if job.get("status") != "DONE":
+            continue
+        collector = job.get("spec", {}).get("collector")
+        if collector in seen_collectors:
+            continue
+        if not _same_target_process(current_target, job.get("spec", {}).get("target", {})):
+            continue
+        artifacts, warnings = _load_optional_json_artifacts(
+            job=job,
+            artifact_names=["hotspots", "suggestions", "ebpf_syscalls", "ebpf_io_latency", "pyspy_profile"],
+            runtime_root=runtime_root,
+        )
+        if not any(artifacts.values()):
+            continue
+        report = build_diagnostic_report(
+            job=job,
+            artifacts=artifacts,
+            baseline_diff=None,
+            data_quality=warnings,
+        )
+        report["related_job_id"] = job.get("job_id")
+        reports.append(report)
+        seen_collectors.add(collector)
+    return reports
+
+
+def _merge_related_reports_for_attribution(report: dict, related_reports: list[dict]) -> dict:
+    merged = dict(report)
+    sections = list(report.get("sections", [])) if isinstance(report.get("sections"), list) else []
+    findings = list(report.get("findings", [])) if isinstance(report.get("findings"), list) else []
+    related_jobs: list[dict] = []
+
+    for related in related_reports:
+        related_job_id = related.get("related_job_id") or related.get("job_id")
+        collector = related.get("collector", "unknown")
+        related_jobs.append(
+            {
+                "job_id": related_job_id,
+                "collector": collector,
+                "severity": related.get("severity", "INFO"),
+                "finding_count": related.get("finding_count", 0),
+            }
+        )
+        for section in related.get("sections", []):
+            if not isinstance(section, dict):
+                continue
+            if section.get("section_id") in {"job_overview", "target_process", "findings"}:
+                continue
+            copied_section = dict(section)
+            copied_section["related_job_id"] = related_job_id
+            copied_section["title"] = f"{section.get('title', section.get('section_id', 'Section'))} ({collector} related)"
+            sections.append(copied_section)
+        for finding in related.get("findings", []):
+            if not isinstance(finding, dict):
+                continue
+            copied_finding = dict(finding)
+            copied_finding["related_job_id"] = related_job_id
+            source = copied_finding.get("source") or "related"
+            copied_finding["source"] = f"related_job:{related_job_id}:{source}"
+            findings.append(copied_finding)
+
+    merged["sections"] = sections
+    merged["findings"] = findings
+    merged["finding_count"] = len(findings)
+    merged["related_evidence_jobs"] = related_jobs
+    return merged
+
+
+def _same_target_process(left: dict, right: dict) -> bool:
+    if not left or not right:
+        return False
+    left_comm = left.get("comm")
+    right_comm = right.get("comm")
+    if left_comm and right_comm and left_comm == right_comm:
+        return True
+    left_cmdline = left.get("cmdline")
+    right_cmdline = right.get("cmdline")
+    if left_cmdline and right_cmdline and left_cmdline == right_cmdline:
+        return True
+    left_pid = left.get("pid")
+    right_pid = right.get("pid")
+    return bool(left_pid and right_pid and left_pid == right_pid)
 
 
 def _find_previous_ebpf_latency_job(jobs: list[dict], current_job: dict) -> dict | None:

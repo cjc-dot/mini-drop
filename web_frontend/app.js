@@ -17,6 +17,8 @@ const diagnosisSummary = document.querySelector("#diagnosisSummary");
 const diagnosisBody = document.querySelector("#diagnosisBody");
 const attributionSummary = document.querySelector("#attributionSummary");
 const attributionBody = document.querySelector("#attributionBody");
+const llmSummary = document.querySelector("#llmSummary");
+const llmBody = document.querySelector("#llmBody");
 const flamegraphOpenLink = document.querySelector("#flamegraphOpenLink");
 const flamegraphFrame = document.querySelector("#flamegraphFrame");
 const hotspotSummary = document.querySelector("#hotspotSummary");
@@ -312,6 +314,7 @@ function renderAttribution(report) {
       const actions = Array.isArray(claim.next_actions) ? claim.next_actions : [];
       const missingEvidence = Array.isArray(claim.missing_evidence) ? claim.missing_evidence : [];
       const evidenceSources = Array.isArray(claim.evidence_sources) ? claim.evidence_sources : [];
+      const evidenceLimit = claim.claim_type === "fusion" ? 6 : 2;
       return `
         <article class="attribution-card">
           <div class="attribution-head">
@@ -319,6 +322,7 @@ function renderAttribution(report) {
               <strong>${escapeHtml(claim.title || claim.claim_id || "Root cause claim")}</strong>
               <p>${escapeHtml(claim.root_cause || "-")}</p>
               <p class="attribution-meta">
+                ${escapeHtml(claim.claim_type || "single")} ·
                 ${escapeHtml(claim.triage_priority || "P4")} · score ${escapeHtml(claim.confidence_score ?? "-")} ·
                 ${escapeHtml(claim.evidence_count ?? evidence.length)} evidence ·
                 ${escapeHtml(evidenceSources.join(", ") || "no source")}
@@ -334,7 +338,7 @@ function renderAttribution(report) {
             <div class="attribution-evidence">
               <h4>Evidence</h4>
               <ul>
-                ${evidence.slice(0, 2).map((item) => `
+                ${evidence.slice(0, evidenceLimit).map((item) => `
                   <li>
                     <span>${escapeHtml(item.source || "-")}</span>
                     ${escapeHtml(item.summary || item.evidence_id || "-")}
@@ -358,6 +362,56 @@ function renderAttribution(report) {
         </article>
       `;
     }).join("")}
+  `;
+}
+
+function renderLlmReport(report) {
+  if (!report) {
+    llmSummary.textContent = "not available";
+    llmBody.innerHTML = `<p class="empty">No LLM report</p>`;
+    return;
+  }
+
+  const mode = report.mode || "template";
+  const provider = report.provider || "template";
+  const keyPoints = Array.isArray(report.key_points) ? report.key_points : [];
+  const recommendations = Array.isArray(report.recommendations) ? report.recommendations : [];
+  const evidence = Array.isArray(report.evidence_used) ? report.evidence_used : [];
+  llmSummary.textContent = `${mode} / ${provider}`;
+  llmBody.innerHTML = `
+    <article class="llm-card">
+      <div class="llm-headline">
+        <span class="badge ${escapeHtml(String(report.severity || "INFO").toLowerCase())}">${escapeHtml(report.severity || "INFO")}</span>
+        <p>${escapeHtml(report.summary || "-")}</p>
+      </div>
+      ${keyPoints.length ? `
+        <div class="llm-block">
+          <h4>Key Points</h4>
+          <ul>${keyPoints.map((point) => `<li>${escapeHtml(point)}</li>`).join("")}</ul>
+        </div>
+      ` : ""}
+      ${recommendations.length ? `
+        <div class="llm-block">
+          <h4>Recommendations</h4>
+          <ol>${recommendations.slice(0, 5).map((action) => `<li>${escapeHtml(action)}</li>`).join("")}</ol>
+        </div>
+      ` : ""}
+      ${evidence.length ? `
+        <div class="llm-block">
+          <h4>Evidence Used</h4>
+          <ul>
+            ${evidence.slice(0, 6).map((item) => `
+              <li class="mono">${escapeHtml(item.type || "-")}: ${escapeHtml(item.id || item.job_id || item.collector || "-")}</li>
+            `).join("")}
+          </ul>
+        </div>
+      ` : ""}
+      ${report.llm_error ? `<p class="llm-warning">LLM fallback: ${escapeHtml(report.llm_error)}</p>` : ""}
+      <details class="llm-markdown">
+        <summary>Markdown</summary>
+        <pre>${escapeHtml(report.markdown || "")}</pre>
+      </details>
+    </article>
   `;
 }
 
@@ -557,14 +611,17 @@ async function loadJobReport(jobId, options = {}) {
   diagnosisBody.innerHTML = `<p class="empty">Loading...</p>`;
   attributionSummary.textContent = "";
   attributionBody.innerHTML = `<p class="empty">Loading...</p>`;
+  llmSummary.textContent = "";
+  llmBody.innerHTML = `<p class="empty">Loading...</p>`;
   suggestionsBody.innerHTML = `<p class="empty">Loading...</p>`;
 
   try {
     const job = await fetchJson(`/api/jobs/${encodeURIComponent(jobId)}`);
     const artifacts = job.artifacts || {};
-    const [diagnosticReport, attributionReport, hotspots, suggestions, ebpfSyscalls, ebpfLatency, ebpfLatencyDiff, pyspyProfile] = await Promise.all([
+    const [diagnosticReport, attributionReport, llmReport, hotspots, suggestions, ebpfSyscalls, ebpfLatency, ebpfLatencyDiff, pyspyProfile] = await Promise.all([
       fetchJson(`/api/jobs/${encodeURIComponent(jobId)}/report`),
       fetchJson(`/api/jobs/${encodeURIComponent(jobId)}/attribution`),
+      fetchJson(`/api/jobs/${encodeURIComponent(jobId)}/llm-report`),
       artifacts.hotspots ? fetchJson(`/api/jobs/${encodeURIComponent(jobId)}/artifacts/hotspots`) : Promise.resolve(null),
       artifacts.suggestions ? fetchJson(`/api/jobs/${encodeURIComponent(jobId)}/artifacts/suggestions`) : Promise.resolve(null),
       artifacts.ebpf_syscalls ? fetchJson(`/api/jobs/${encodeURIComponent(jobId)}/artifacts/ebpf_syscalls`) : Promise.resolve(null),
@@ -583,6 +640,7 @@ async function loadJobReport(jobId, options = {}) {
     }
     renderDiagnosticReport(diagnosticReport);
     renderAttribution(attributionReport);
+    renderLlmReport(llmReport);
     renderHotspots(hotspots);
     renderEbpfSyscalls(ebpfSyscalls);
     renderEbpfLatency(ebpfLatency);

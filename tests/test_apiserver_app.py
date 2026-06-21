@@ -595,6 +595,184 @@ def test_attribution_endpoint_builds_root_cause_claims_from_report(tmp_path) -> 
     assert report["claims"][0]["evidence"][0]["source"] == "diagnostic_section"
 
 
+def test_attribution_endpoint_fuses_related_jobs_for_same_target(tmp_path) -> None:
+    runtime_dir = tmp_path / "runtime"
+    _write_done_job_with_artifacts(
+        runtime_dir=runtime_dir,
+        job_id="job-perf",
+        collector="perf",
+        created_at="2026-06-20T00:03:00+00:00",
+        target_comm="cpu_hotspot",
+        artifacts={
+            "suggestions": {
+                "source": "hotspots",
+                "findings": [
+                    {
+                        "rule_id": "cpu_self_hotspot",
+                        "severity": "HIGH",
+                        "function": "hot_func",
+                        "evidence": {"self_percent": 96.0},
+                    }
+                ],
+            }
+        },
+    )
+    _write_done_job_with_artifacts(
+        runtime_dir=runtime_dir,
+        job_id="job-syscall",
+        collector="ebpf_syscall",
+        created_at="2026-06-20T00:02:00+00:00",
+        target_comm="cpu_hotspot",
+        artifacts={
+            "ebpf_syscalls": {
+                "total_events": 6000,
+                "duration_seconds": 5,
+                "events": [{"event": "read", "count": 6000, "rate_per_second": 1200.0}],
+            }
+        },
+    )
+    _write_done_job_with_artifacts(
+        runtime_dir=runtime_dir,
+        job_id="job-latency",
+        collector="ebpf_io_latency",
+        created_at="2026-06-20T00:01:00+00:00",
+        target_comm="cpu_hotspot",
+        artifacts={
+            "ebpf_io_latency": {
+                "collector": "ebpf_io_latency",
+                "unit": "us",
+                "total_events": 100,
+                "events": [
+                    {
+                        "event": "read",
+                        "total_count": 100,
+                        "p50_bucket": "1000-10000",
+                        "p99_bucket": "1000-10000",
+                        "tail_1ms_percent": 90.0,
+                    }
+                ],
+            }
+        },
+    )
+    client = TestClient(create_app(str(runtime_dir), process_inspector=FakeProcessInspector({})))
+
+    response = client.get("/api/jobs/job-perf/attribution")
+
+    assert response.status_code == 200
+    report = response.json()
+    assert {job["job_id"] for job in report["related_evidence_jobs"]} == {"job-syscall", "job-latency"}
+    claim_ids = {claim["claim_id"] for claim in report["claims"]}
+    assert "combined:cpu_hotspot_with_syscall_and_io_latency" in claim_ids
+    fusion_claim = next(
+        claim for claim in report["claims"] if claim["claim_id"] == "combined:cpu_hotspot_with_syscall_and_io_latency"
+    )
+    assert fusion_claim["claim_type"] == "fusion"
+    assert fusion_claim["triage_priority"] == "P1"
+    assert set(fusion_claim["fused_claims"]) == {
+        "cpu_hotspot:hot_func",
+        "syscall_rate:read",
+        "io_latency:read",
+    }
+
+
+def test_llm_report_endpoint_returns_template_report_without_api_key(tmp_path, monkeypatch) -> None:
+    monkeypatch.delenv("MINIDROP_LLM_API_KEY", raising=False)
+    runtime_dir = tmp_path / "runtime"
+    _write_done_job_with_artifacts(
+        runtime_dir=runtime_dir,
+        job_id="job-perf",
+        collector="perf",
+        created_at="2026-06-20T00:03:00+00:00",
+        target_comm="cpu_hotspot",
+        artifacts={
+            "suggestions": {
+                "source": "hotspots",
+                "findings": [
+                    {
+                        "rule_id": "cpu_self_hotspot",
+                        "severity": "HIGH",
+                        "function": "hot_func",
+                        "evidence": {"self_percent": 96.0},
+                    }
+                ],
+            }
+        },
+    )
+    client = TestClient(create_app(str(runtime_dir), process_inspector=FakeProcessInspector({})))
+
+    response = client.get("/api/jobs/job-perf/llm-report")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["source"] == "llm_report"
+    assert payload["mode"] == "template"
+    assert payload["provider"] == "template"
+    assert payload["job_id"] == "job-perf"
+    assert "markdown" in payload
+    assert payload["key_points"]
+
+
+def test_llm_report_endpoint_reports_missing_llm_configuration_when_forced(tmp_path, monkeypatch) -> None:
+    monkeypatch.delenv("MINIDROP_LLM_API_KEY", raising=False)
+    runtime_dir = tmp_path / "runtime"
+    _write_done_job_with_artifacts(
+        runtime_dir=runtime_dir,
+        job_id="job-perf",
+        collector="perf",
+        created_at="2026-06-20T00:03:00+00:00",
+        target_comm="cpu_hotspot",
+        artifacts={},
+    )
+    client = TestClient(create_app(str(runtime_dir), process_inspector=FakeProcessInspector({})))
+
+    response = client.get("/api/jobs/job-perf/llm-report?mode=llm")
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "LLM client is not configured"
+
+
+def _write_done_job_with_artifacts(
+    runtime_dir: Path,
+    job_id: str,
+    collector: str,
+    created_at: str,
+    target_comm: str,
+    artifacts: dict[str, dict],
+) -> None:
+    profile_dir = runtime_dir / "profiles" / job_id
+    job_dir = runtime_dir / "jobs" / job_id
+    profile_dir.mkdir(parents=True)
+    job_dir.mkdir(parents=True)
+    artifact_paths = {}
+    for artifact_name, payload in artifacts.items():
+        artifact_file = profile_dir / f"{artifact_name}.json"
+        artifact_file.write_text(json.dumps(payload), encoding="utf-8")
+        artifact_paths[artifact_name] = str(artifact_file)
+    job = {
+        "job_id": job_id,
+        "status": "DONE",
+        "reason": "job completed successfully",
+        "spec": {
+            "job_id": job_id,
+            "pid": 1234,
+            "duration_seconds": 5,
+            "sample_frequency": 99,
+            "collector": collector,
+            "target": {
+                "pid": 1234,
+                "comm": target_comm,
+                "cmdline": f"/tmp/{target_comm}",
+                "starttime": 42,
+            },
+        },
+        "artifacts": artifact_paths,
+        "error_message": None,
+        "created_at": created_at,
+        "updated_at": created_at,
+    }
+    (job_dir / "job.json").write_text(json.dumps(job), encoding="utf-8")
+
+
 def _write_latency_job(
     runtime_dir: Path,
     job_id: str,
