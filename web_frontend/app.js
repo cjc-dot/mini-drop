@@ -15,6 +15,8 @@ const jobReportContent = document.querySelector("#jobReportContent");
 const jobReportMeta = document.querySelector("#jobReportMeta");
 const diagnosisSummary = document.querySelector("#diagnosisSummary");
 const diagnosisBody = document.querySelector("#diagnosisBody");
+const attributionSummary = document.querySelector("#attributionSummary");
+const attributionBody = document.querySelector("#attributionBody");
 const flamegraphOpenLink = document.querySelector("#flamegraphOpenLink");
 const flamegraphFrame = document.querySelector("#flamegraphFrame");
 const hotspotSummary = document.querySelector("#hotspotSummary");
@@ -284,6 +286,67 @@ function renderDiagnosticSection(section) {
   `;
 }
 
+function renderAttribution(report) {
+  if (!report) {
+    attributionSummary.textContent = "not available";
+    attributionBody.innerHTML = `<p class="empty">No attribution report</p>`;
+    return;
+  }
+
+  const claims = Array.isArray(report.claims) ? report.claims : [];
+  attributionSummary.textContent = `${report.severity || "INFO"} / ${report.claim_count || claims.length} claim(s)`;
+  if (claims.length === 0) {
+    attributionBody.innerHTML = `
+      <div class="attribution-empty">
+        <span class="badge ok">OK</span>
+        <p>${escapeHtml(report.summary || "No clear root-cause hypothesis")}</p>
+      </div>
+    `;
+    return;
+  }
+
+  attributionBody.innerHTML = `
+    <p class="attribution-summary">${escapeHtml(report.summary || "")}</p>
+    ${claims.slice(0, 4).map((claim) => {
+      const evidence = Array.isArray(claim.evidence) ? claim.evidence : [];
+      const actions = Array.isArray(claim.next_actions) ? claim.next_actions : [];
+      return `
+        <article class="attribution-card">
+          <div class="attribution-head">
+            <div>
+              <strong>${escapeHtml(claim.title || claim.claim_id || "Root cause claim")}</strong>
+              <p>${escapeHtml(claim.root_cause || "-")}</p>
+            </div>
+            <div class="attribution-badges">
+              <span class="badge ${escapeHtml(String(claim.severity || "INFO").toLowerCase())}">${escapeHtml(claim.severity || "INFO")}</span>
+              <span class="badge confidence">${escapeHtml(claim.confidence || "LOW")}</span>
+            </div>
+          </div>
+          ${evidence.length ? `
+            <div class="attribution-evidence">
+              <h4>Evidence</h4>
+              <ul>
+                ${evidence.slice(0, 2).map((item) => `
+                  <li>
+                    <span>${escapeHtml(item.source || "-")}</span>
+                    ${escapeHtml(item.summary || item.evidence_id || "-")}
+                  </li>
+                `).join("")}
+              </ul>
+            </div>
+          ` : ""}
+          ${actions.length ? `
+            <div class="attribution-actions">
+              <h4>Next Actions</h4>
+              <ol>${actions.slice(0, 3).map((action) => `<li>${escapeHtml(action)}</li>`).join("")}</ol>
+            </div>
+          ` : ""}
+        </article>
+      `;
+    }).join("")}
+  `;
+}
+
 function formatFindingEvidence(evidence) {
   if (evidence.self_percent !== undefined || evidence.inclusive_percent !== undefined) {
     return `Self ${evidence.self_percent ?? 0}%, inclusive ${evidence.inclusive_percent ?? 0}%.`;
@@ -478,13 +541,16 @@ async function loadJobReport(jobId, options = {}) {
   pyspyBody.innerHTML = `<tr><td colspan="4" class="empty">Loading...</td></tr>`;
   diagnosisSummary.textContent = "";
   diagnosisBody.innerHTML = `<p class="empty">Loading...</p>`;
+  attributionSummary.textContent = "";
+  attributionBody.innerHTML = `<p class="empty">Loading...</p>`;
   suggestionsBody.innerHTML = `<p class="empty">Loading...</p>`;
 
   try {
     const job = await fetchJson(`/api/jobs/${encodeURIComponent(jobId)}`);
     const artifacts = job.artifacts || {};
-    const [diagnosticReport, hotspots, suggestions, ebpfSyscalls, ebpfLatency, ebpfLatencyDiff, pyspyProfile] = await Promise.all([
+    const [diagnosticReport, attributionReport, hotspots, suggestions, ebpfSyscalls, ebpfLatency, ebpfLatencyDiff, pyspyProfile] = await Promise.all([
       fetchJson(`/api/jobs/${encodeURIComponent(jobId)}/report`),
+      fetchJson(`/api/jobs/${encodeURIComponent(jobId)}/attribution`),
       artifacts.hotspots ? fetchJson(`/api/jobs/${encodeURIComponent(jobId)}/artifacts/hotspots`) : Promise.resolve(null),
       artifacts.suggestions ? fetchJson(`/api/jobs/${encodeURIComponent(jobId)}/artifacts/suggestions`) : Promise.resolve(null),
       artifacts.ebpf_syscalls ? fetchJson(`/api/jobs/${encodeURIComponent(jobId)}/artifacts/ebpf_syscalls`) : Promise.resolve(null),
@@ -502,6 +568,7 @@ async function loadJobReport(jobId, options = {}) {
       flamegraphOpenLink.classList.remove("hidden");
     }
     renderDiagnosticReport(diagnosticReport);
+    renderAttribution(attributionReport);
     renderHotspots(hotspots);
     renderEbpfSyscalls(ebpfSyscalls);
     renderEbpfLatency(ebpfLatency);

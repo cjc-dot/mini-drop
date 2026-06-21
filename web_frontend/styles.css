@@ -282,6 +282,11 @@ tr.selected-row .link-button {
   color: #1c4ed8;
 }
 
+.badge.confidence {
+  background: #f1f5f9;
+  color: #334155;
+}
+
 .empty {
   color: var(--muted);
   text-align: center;
@@ -448,6 +453,86 @@ a {
 .diagnosis-section dd {
   margin: 0;
   overflow-wrap: anywhere;
+}
+
+.attribution-body {
+  display: grid;
+  gap: 12px;
+}
+
+.attribution-summary {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.attribution-empty {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.attribution-empty p {
+  margin: 2px 0 0;
+  line-height: 1.5;
+}
+
+.attribution-card {
+  display: grid;
+  gap: 12px;
+  border: 1px solid #e6ebf3;
+  border-radius: 6px;
+  padding: 12px;
+  background: #fbfdff;
+}
+
+.attribution-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+}
+
+.attribution-head strong {
+  display: block;
+  margin-bottom: 6px;
+}
+
+.attribution-head p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.attribution-badges {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.attribution-evidence h4,
+.attribution-actions h4 {
+  margin: 0 0 6px;
+  font-size: 13px;
+}
+
+.attribution-evidence ul,
+.attribution-actions ol {
+  margin: 0 0 0 20px;
+  padding: 0;
+}
+
+.attribution-evidence li,
+.attribution-actions li {
+  margin: 4px 0;
+  line-height: 1.45;
+}
+
+.attribution-evidence span {
+  display: inline-flex;
+  margin-right: 6px;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .compact-table {
@@ -684,6 +769,10 @@ a {
   }
 
   .diagnosis-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .attribution-head {
     grid-template-columns: 1fr;
   }
 }

@@ -573,6 +573,28 @@ def test_diagnostic_report_endpoint_includes_python_profile_section(tmp_path) ->
     assert "python_profile" in {section["section_id"] for section in report["sections"]}
 
 
+def test_attribution_endpoint_builds_root_cause_claims_from_report(tmp_path) -> None:
+    runtime_dir = tmp_path / "runtime"
+    _write_latency_job(
+        runtime_dir=runtime_dir,
+        job_id="job-current",
+        created_at="2026-06-20T00:01:00+00:00",
+        tail_1ms_percent=25.0,
+        p99_bucket="1000-10000",
+    )
+    client = TestClient(create_app(str(runtime_dir), process_inspector=FakeProcessInspector({})))
+
+    response = client.get("/api/jobs/job-current/attribution")
+
+    assert response.status_code == 200
+    report = response.json()
+    assert report["source"] == "diagnostic_report"
+    assert report["job_id"] == "job-current"
+    assert report["claim_count"] == 1
+    assert report["claims"][0]["claim_id"] == "io_latency:read"
+    assert report["claims"][0]["evidence"][0]["source"] == "diagnostic_section"
+
+
 def _write_latency_job(
     runtime_dir: Path,
     job_id: str,

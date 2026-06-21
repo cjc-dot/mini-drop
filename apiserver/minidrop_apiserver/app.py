@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from minidrop_analysis.attribution import build_attribution_report
 from minidrop_analysis.latency_diff import compare_latency_reports, no_latency_baseline_report
 from minidrop_analysis.report import build_diagnostic_report
 from minidrop_analysis.structured_log import log_event
@@ -307,6 +308,10 @@ def create_app(runtime_dir: str | None = None, process_inspector: ProcessInspect
             baseline_diff=baseline_diff,
             data_quality=warnings,
         )
+
+    @app.get("/api/jobs/{job_id}/attribution")
+    def get_attribution_report(job_id: str) -> dict:
+        return build_attribution_report(get_diagnostic_report(job_id))
 
     @app.post("/api/agents/{agent_id}/heartbeat")
     def agent_heartbeat(agent_id: str, request: AgentHeartbeatRequest) -> dict:

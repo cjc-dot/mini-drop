@@ -31,6 +31,7 @@ def test_web_frontend_uses_existing_api_routes() -> None:
     assert "/artifacts/pyspy_profile" in app_js
     assert "/compare/ebpf-io-latency" in app_js
     assert "/report" in app_js
+    assert "/attribution" in app_js
     assert "collectorInput" in app_js
     assert "continuousInput" in app_js
     assert "renderContinuousProfiles" in app_js
@@ -51,6 +52,7 @@ def test_web_frontend_contains_job_report_panel() -> None:
     assert 'id="ebpfDiffBody"' in index
     assert 'id="pyspyBody"' in index
     assert 'id="diagnosisBody"' in index
+    assert 'id="attributionBody"' in index
     assert 'id="collectorInput"' in index
     assert 'id="continuousInput"' in index
     assert 'id="sliceCountInput"' in index
@@ -59,6 +61,7 @@ def test_web_frontend_contains_job_report_panel() -> None:
     assert "Rate/s" in index
     assert "Continuous Profiles" in index
     assert "Diagnosis Report" in index
+    assert "Root Cause Attribution" in index
     assert "eBPF IO Latency" in index
     assert "eBPF Baseline Diff" in index
     assert "Python Profile" in index
@@ -72,6 +75,7 @@ def test_web_frontend_contains_job_report_panel() -> None:
     assert "renderLatencyBar" in app_js
     assert "renderLatencyDiff" in app_js
     assert "renderDiagnosticReport" in app_js
+    assert "renderAttribution" in app_js
     assert "renderPyspyProfile" in app_js
     assert "formatSigned" in app_js
 
@@ -89,6 +93,8 @@ def test_web_frontend_contains_latency_chart_styles() -> None:
     assert ".badge.regressed" in styles
     assert ".diagnosis-body" in styles
     assert ".diagnosis-grid" in styles
+    assert ".attribution-body" in styles
+    assert ".attribution-card" in styles
 
 
 def test_web_ui_route_serves_index(tmp_path: Path) -> None:
